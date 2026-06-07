@@ -7,7 +7,7 @@ from telegram.ext import Application, CommandHandler, CallbackQueryHandler, Cont
 from flask import Flask, request
 
 TOKEN = "8981742192:AAHC8z6u6GifXgMIafvzv0tn_Q2LV1mM2bQ"
-BASE_URL = "https://barcelona-l5tu.onrender.com/webhook"  # آدرس Render شما (مثلاً https://bot.onrender.com)
+BASE_URL = "https://barcelona-l5tu.onrender.com"  # آدرس اصلی، بدون /webhook
 CHANNELS = ["@film01385"]
 
 # Flask app
@@ -90,10 +90,14 @@ async def handle_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # ========== Webhook ==========
 @flask_app.route('/webhook', methods=['POST'])
-async def webhook():
-    update = Update.de_json(request.get_json(), application.bot)
-    await application.process_update(update)
-    return "ok", 200
+def webhook():  # این تابع را به حالت عادی (غیر async) تغییر دادیم
+    try:
+        update = Update.de_json(request.get_json(), application.bot)
+        application.process_update(update)  # await را برداشتیم
+        return "ok", 200
+    except Exception as e:
+        print(f"خطا در وب‌هوک: {e}")
+        return "error", 500
 
 @flask_app.route('/')
 def index():
@@ -105,7 +109,7 @@ if __name__ == "__main__":
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CallbackQueryHandler(handle_buttons))
 
-    # مقداردهی اولیه (برای Webhook نیازی به polling نیست)
+    # مقداردهی اولیه Webhook (اینجا دیگر نیازی به /webhook اضافه نیست)
     application.bot.set_webhook(url=f"{BASE_URL}/webhook")
 
     # اجرای Flask
