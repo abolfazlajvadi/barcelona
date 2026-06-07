@@ -167,9 +167,7 @@ def handle_buttons(call):
         
         msg = bot.edit_message_text(
             f"🔗 **لینک اختصاصی شما:**\n\n"
-            f"`{link}`\n\n"
-            "این لینک را در بیوگرافی یا جایی که می‌خواهید قرار دهید.\n"
-            "هر کس روی آن کلیک کند، برای شما گزارش می‌شود.",
+            f"`{link}`"
             chat_id, call.message.message_id,
             reply_markup=keyboard,
             parse_mode='Markdown'
