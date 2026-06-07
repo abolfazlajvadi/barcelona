@@ -5,6 +5,7 @@ import sqlite3
 import random
 import string
 from datetime import datetime
+from threading import Thread
 from flask import Flask, request, redirect
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes
@@ -12,8 +13,8 @@ import asyncio
 
 # ---------- تنظیمات اولیه ----------
 TOKEN = "8981742192:AAHC8z6u6GifXgMIafvzv0tn_Q2LV1mM2bQ"
-BASE_URL = "https://barcelona-l5tu.onrender.com"  # آدرس اصلی سرویس (بدون / در انتها)
-CHANNELS = ["@film01385"]  # لیست کانال‌های اجباری
+BASE_URL = "https://barcelona-l5tu.onrender.com"
+CHANNELS = ["@film01385"]
 
 # ---------- Flask ----------
 flask_app = Flask(__name__)
@@ -37,14 +38,12 @@ conn.commit()
 
 # ---------- توابع کمکی ----------
 def get_ip():
-    """دریافت IP واقعی کاربر (حتی با پروکسی)"""
     forwarded = request.headers.get('X-Forwarded-For')
     if forwarded:
         return forwarded.split(',')[0]
     return request.remote_addr
 
 def generate_link(telegram_id):
-    """ساخت لینک اختصاصی برای کاربر"""
     code = ''.join(random.choices(string.ascii_letters + string.digits, k=10))
     full_link = f"{BASE_URL}/track/{code}"
     c.execute("INSERT OR REPLACE INTO users (telegram_id, link_code, link_full) VALUES (?, ?, ?)", 
@@ -53,12 +52,11 @@ def generate_link(telegram_id):
     return full_link
 
 def get_user_id_by_code(code):
-    """پیدا کردن telegram_id کاربر از روی کد لینک"""
     c.execute("SELECT telegram_id FROM users WHERE link_code = ?", (code,))
     result = c.fetchone()
     return result[0] if result else None
 
-# ---------- بررسی عضویت در کانال ----------
+# ---------- بررسی عضویت ----------
 async def is_member(user_id):
     for channel in CHANNELS:
         try:
@@ -69,8 +67,8 @@ async def is_member(user_id):
             return False
     return True
 
-# ---------- نمایش پنل کاربری ----------
-async def show_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
+# ---------- نمایش پنل ----------
+async def show_panel(update: Update, context: ContextTypes.DEFAULT_TYPE, message=None):
     keyboard = [
         [InlineKeyboardButton("🔗 دریافت لینک من", callback_data="get_link")],
         [InlineKeyboardButton("💰 خرید اشتراک پرو", callback_data="buy_sub")],
@@ -79,12 +77,13 @@ async def show_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
         [InlineKeyboardButton("✏️ تنظیم متن", callback_data="set_text")],
         [InlineKeyboardButton("📖 راهنما", callback_data="help")]
     ]
-    await update.message.reply_text(
+    target = message or update.message
+    await target.reply_text(
         "به پنل کاربری خود خوش آمدید.\nلطفاً یک گزینه را انتخاب کنید:",
         reply_markup=InlineKeyboardMarkup(keyboard)
     )
 
-# ---------- هندلرهای ربات تلگرام ----------
+# ---------- هندلرهای ربات ----------
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     if await is_member(user.id):
@@ -105,10 +104,9 @@ async def handle_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if data == "check_membership":
         if await is_member(user_id):
             await query.edit_message_text("✅ عضویت تأیید شد! در حال نمایش پنل...")
-            await show_panel(update, context)
+            await show_panel(update, context, message=query.message)
         else:
             await query.edit_message_text("❌ شما هنوز عضو همه کانال‌ها نشده‌اید.")
-
     elif data == "get_link":
         link = generate_link(user_id)
         keyboard = [[InlineKeyboardButton("🌐 باز کردن لینک", url=link)]]
@@ -117,39 +115,31 @@ async def handle_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "این لینک را در بیوگرافی تلگرام خود قرار دهید.",
             reply_markup=InlineKeyboardMarkup(keyboard)
         )
-
     else:
         await query.edit_message_text("⏳ این بخش در حال توسعه است.")
 
-# ========== مسیرهای Flask (برای وب‌هوک و ردیابی کلیک) ==========
+# ========== مسیرهای Flask ==========
 @flask_app.route('/webhook', methods=['POST'])
 def webhook():
-    """دریافت آپدیت از تلگرام"""
     try:
         update = Update.de_json(request.get_json(), application.bot)
         asyncio.run(application.process_update(update))
         return "ok", 200
     except Exception as e:
-        print(f"خطا در وب‌هوک: {e}")
+        print(f"Webhook error: {e}")
         return "error", 500
 
 @flask_app.route('/track/<code>')
 def track_click(code):
-    """ثبت کلیک و ارسال گزارش به صاحب لینک"""
-    # پیدا کردن صاحب لینک
     user_a_id = get_user_id_by_code(code)
-    
-    # ثبت اطلاعات کلیک در دیتابیس
     ip_address = get_ip()
     user_agent = request.headers.get('User-Agent', 'Unknown')
     c.execute("INSERT INTO clicks (link_code, ip, user_agent) VALUES (?, ?, ?)", 
               (code, ip_address, user_agent))
     conn.commit()
     
-    # ارسال پیام به کاربر A (صاحب لینک) در صورت وجود
     if user_a_id:
         try:
-            # استفاده از event loop موجود برای ارسال پیام
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
             loop.run_until_complete(
@@ -160,9 +150,8 @@ def track_click(code):
                 )
             )
         except Exception as e:
-            print(f"خطا در ارسال پیام به کاربر {user_a_id}: {e}")
+            print(f"Error sending to {user_a_id}: {e}")
     
-    # هدایت کاربر B به یک صفحه یا کانال دلخواه
     return redirect("https://t.me/your_channel", code=302)
 
 @flask_app.route('/')
@@ -171,10 +160,8 @@ def index():
 
 # ========== اجرای اصلی ==========
 if __name__ == "__main__":
-    # ساخت نمونه از Application
+    # ایجاد نمونه Application در سطح جهانی
     application = Application.builder().token(TOKEN).build()
-    
-    # اضافه کردن هندلرها
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CallbackQueryHandler(handle_buttons))
     
@@ -182,14 +169,13 @@ if __name__ == "__main__":
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
     loop.run_until_complete(application.bot.set_webhook(url=f"{BASE_URL}/webhook"))
-    print(f"✅ Webhook تنظیم شد: {BASE_URL}/webhook")
+    print(f"✅ Webhook set: {BASE_URL}/webhook")
     
-    # اجرای Flask (با ترد جداگانه برای ربات)
-    from threading import Thread
+    # اجرای Flask در یک ترد جداگانه
     def run_flask():
         flask_app.run(host="0.0.0.0", port=10000)
     
     Thread(target=run_flask).start()
     
-    # اجرای ربات (برای پردازش آپدیت‌های پس‌زمینه)
+    # اجرای حلقه اصلی asyncio (برای پردازش آپدیت‌ها)
     loop.run_forever()
