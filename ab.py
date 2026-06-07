@@ -109,4 +109,4 @@ if __name__ == "__main__":
     application.bot.set_webhook(url=f"{BASE_URL}/webhook")
 
     # اجرای Flask
-    flask_app.run(host="0.0.0.0", port=10000)pip install flask
+    flask_app.run(host="0.0.0.0", port=10000)
