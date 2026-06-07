@@ -15,6 +15,9 @@ CHANNELS = ["@film01385"]
 bot = telebot.TeleBot(TOKEN)
 app = Flask(__name__)
 
+# ---------- دیکشنری برای ذخیره پیام لینک هر کاربر ----------
+user_link_messages = {}
+
 # ---------- دیتابیس ----------
 conn = sqlite3.connect("/tmp/tracker.db", check_same_thread=False)
 c = conn.cursor()
@@ -145,13 +148,20 @@ def handle_buttons(call):
         link = generate_link(user_id)
         keyboard = InlineKeyboardMarkup()
         keyboard.add(InlineKeyboardButton("🌐 باز کردن لینک", url=link))
-        bot.edit_message_text(
+        
+        msg = bot.edit_message_text(
             f"🔗 لینک اختصاصی شما:\n\n{link}\n\n"
             "این لینک را در بیوگرافی یا جایی که می‌خواهید قرار دهید.\n"
-            "هر کس روی آن کلیک کند، برای شما گزارش می‌شود.",
+            "هر کس روی آن کلیک کند، در همین پیام برای شما گزارش می‌شود.",
             chat_id, call.message.message_id,
             reply_markup=keyboard
         )
+        # ذخیره اطلاعات پیام برای به‌روزرسانی بعدی
+        user_link_messages[user_id] = {
+            "chat_id": chat_id,
+            "message_id": msg.message_id,
+            "link_code": link.split('/')[-1]
+        }
     
     elif call.data == "buy_sub":
         bot.answer_callback_query(call.id, "💰 بخش خرید اشتراک پرو در حال توسعه است.\nبه زودی...", show_alert=True)
@@ -236,6 +246,22 @@ def track_click(code):
               (code, ip_address, user_agent))
     conn.commit()
     
+    # به‌روزرسانی پیام لینک کاربر (اگر وجود داشته باشد)
+    if user_a_id and user_a_id in user_link_messages:
+        msg_info = user_link_messages[user_a_id]
+        try:
+            capture_text = get_user_capture_text(user_a_id)
+            bot.edit_message_text(
+                f"🔗 لینک اختصاصی شما:\n\nhttps://t.me/.../{msg_info['link_code']}\n\n"
+                "این لینک را در بیوگرافی خود قرار دهید.\n\n"
+                f"🎯 **{capture_text}**\n"
+                f"📅 زمان: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
+                msg_info["chat_id"], msg_info["message_id"]
+            )
+        except Exception as e:
+            print(f"Error updating message: {e}")
+    
+    # ارسال پیام خصوصی به کاربر
     if user_a_id:
         try:
             capture_text = get_user_capture_text(user_a_id)
