@@ -155,29 +155,29 @@ def handle_buttons(call):
         else:
             bot.answer_callback_query(call.id, "❌ شما هنوز در همه کانال‌ها عضو نشده‌اید.", show_alert=True)
     
-    elif call.data == "get_link":
-        link = generate_link(user_id)
-        link_code = link.split('/')[-1]
-        
-        keyboard = InlineKeyboardMarkup(row_width=2)
-        keyboard.add(
-            InlineKeyboardButton("📋 کپی لینک من", callback_data=f"copy_{link_code}"),
-            InlineKeyboardButton("🔒 مخفی کردن لینک", callback_data="hide_link")
-        )
-        
-        msg = bot.edit_message_text(
-            f"🔗 **لینک اختصاصی شما:**\n\n"
-            f"`{link}`"
-            chat_id, call.message.message_id,
-            reply_markup=keyboard,
-            parse_mode='Markdown'
-        )
-        
-        user_link_messages[user_id] = {
-            "chat_id": chat_id,
-            "message_id": msg.message_id,
-            "link_code": link_code
-        }
+elif call.data == "get_link":
+    link = generate_link(user_id)
+    link_code = link.split('/')[-1]
+    
+    keyboard = InlineKeyboardMarkup(row_width=2)
+    keyboard.add(
+        InlineKeyboardButton("📋 کپی لینک من", callback_data=f"copy_{link_code}"),
+        InlineKeyboardButton("🔒 مخفی کردن لینک", callback_data="hide_link")
+    )
+    
+    msg = bot.edit_message_text(
+        f"🔗 **لینک اختصاصی شما:**\n\n"
+        f"`{link}`",
+        chat_id, call.message.message_id,
+        reply_markup=keyboard,
+        parse_mode='Markdown'
+    )
+    
+    user_link_messages[user_id] = {
+        "chat_id": chat_id,
+        "message_id": msg.message_id,
+        "link_code": link_code
+    }
     
     elif call.data.startswith("copy_"):
         link_code = call.data.split("_")[1]
