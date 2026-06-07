@@ -1,5 +1,5 @@
-import nest_asyncio
-nest_asyncio.apply()
+# import nest_asyncio
+# nest_asyncio.apply()
 
 import sqlite3
 import random
