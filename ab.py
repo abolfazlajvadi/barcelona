@@ -9,7 +9,7 @@ from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 import threading
 
 # ---------- تنظیمات اولیه ----------
-TOKEN = "8981742192:AAHC8z6u6GifXgMIafvzv0tn_Q2LV1mM2bQ"
+TOKEN = "8981742192:AAHC8z6u6GifXgMIafvzv0tn_Q2LV1mM2bQ" 
 BASE_URL = "https://barcelona-l5tu.onrender.com"
 CHANNELS = ["@film01385"]
 CHANNEL_NAMES = {
