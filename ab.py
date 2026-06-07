@@ -6,9 +6,9 @@ from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes
 from flask import Flask, request
 
-TOKEN = "توکن_ربات_تو"
-BASE_URL = "https://your-domain.com"  # آدرس Render شما (مثلاً https://bot.onrender.com)
-CHANNELS = ["@channel1", "@channel2"]
+TOKEN = "8981742192:AAHC8z6u6GifXgMIafvzv0tn_Q2LV1mM2bQ"
+BASE_URL = "https://barcelona-l5tu.onrender.com"  # آدرس Render شما (مثلاً https://bot.onrender.com)
+CHANNELS = ["@film01385"]
 
 # Flask app
 flask_app = Flask(__name__)
@@ -109,4 +109,4 @@ if __name__ == "__main__":
     application.bot.set_webhook(url=f"{BASE_URL}/webhook")
 
     # اجرای Flask
-    flask_app.run(host="0.0.0.0", port=10000)
+    flask_app.run(host="0.0.0.0", port=10000)pip install flask
