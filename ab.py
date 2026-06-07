@@ -155,29 +155,29 @@ def handle_buttons(call):
         else:
             bot.answer_callback_query(call.id, "❌ شما هنوز در همه کانال‌ها عضو نشده‌اید.", show_alert=True)
     
-elif call.data == "get_link":
-    link = generate_link(user_id)
-    link_code = link.split('/')[-1]
-    
-    keyboard = InlineKeyboardMarkup(row_width=2)
-    keyboard.add(
-        InlineKeyboardButton("📋 کپی لینک من", callback_data=f"copy_{link_code}"),
-        InlineKeyboardButton("🔒 مخفی کردن لینک", callback_data="hide_link")
-    )
-    
-    msg = bot.edit_message_text(
-        f"🔗 **لینک اختصاصی شما:**\n\n"
-        f"`{link}`",
-        chat_id, call.message.message_id,
-        reply_markup=keyboard,
-        parse_mode='Markdown'
-    )
-    
-    user_link_messages[user_id] = {
-        "chat_id": chat_id,
-        "message_id": msg.message_id,
-        "link_code": link_code
-    }
+    elif call.data == "get_link":
+        link = generate_link(user_id)
+        link_code = link.split('/')[-1]
+        
+        keyboard = InlineKeyboardMarkup(row_width=2)
+        keyboard.add(
+            InlineKeyboardButton("📋 کپی لینک من", callback_data=f"copy_{link_code}"),
+            InlineKeyboardButton("🔒 مخفی کردن لینک", callback_data="hide_link")
+        )
+        
+        msg = bot.edit_message_text(
+            f"🔗 **لینک اختصاصی شما:**\n\n"
+            f"`{link}`",
+            chat_id, call.message.message_id,
+            reply_markup=keyboard,
+            parse_mode='Markdown'
+        )
+        
+        user_link_messages[user_id] = {
+            "chat_id": chat_id,
+            "message_id": msg.message_id,
+            "link_code": link_code
+        }
     
     elif call.data.startswith("copy_"):
         link_code = call.data.split("_")[1]
@@ -278,11 +278,12 @@ def track_click(code):
         try:
             capture_text = get_user_capture_text(user_a_id)
             bot.edit_message_text(
-                f"🔗 لینک اختصاصی شما:\n\n{msg_info['link_code']}\n\n"
-                "این لینک را در بیوگرافی خود قرار دهید.\n\n"
+                f"🔗 لینک اختصاصی شما:\n\n"
+                f"`{msg_info['link_code']}`\n\n"
                 f"🎯 **{capture_text}**\n"
                 f"📅 زمان: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
-                msg_info["chat_id"], msg_info["message_id"]
+                msg_info["chat_id"], msg_info["message_id"],
+                parse_mode='Markdown'
             )
         except Exception as e:
             print(f"Error updating message: {e}")
