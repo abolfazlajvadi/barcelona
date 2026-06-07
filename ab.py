@@ -123,12 +123,21 @@ def start(message):
     if is_user_member(user_id):
         show_panel(message.chat.id)
     else:
-        keyboard = InlineKeyboardMarkup()
-        keyboard.add(InlineKeyboardButton("✅ بررسی عضویت", callback_data="check_membership"))
+        keyboard = InlineKeyboardMarkup(row_width=1)
+        # هر کانال به صورت یک دکمه جداگانه
+        for channel in CHANNELS:
+            keyboard.add(InlineKeyboardButton(
+                f"🔹 {channel}", 
+                url=f"https://t.me/{channel[1:]}"
+            ))
+        # دکمه بررسی عضویت
+        keyboard.add(InlineKeyboardButton("✅ عضو شدم", callback_data="check_membership"))
+        
         bot.reply_to(
             message,
-            f"🔐 برای استفاده از ربات، ابتدا در کانال‌های زیر عضو شوید:\n{chr(10).join(CHANNELS)}",
-            reply_markup=keyboard
+            "👋 **کاربر گرامی، برای دریافت فایل ابتدا در کانال های زیر عضو شوید:**",
+            reply_markup=keyboard,
+            parse_mode='Markdown'
         )
 
 # ---------- هندلر دکمه‌های شیشه‌ای ----------
