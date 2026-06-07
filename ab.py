@@ -6,6 +6,7 @@ from telegram.ext import Application, CommandHandler, CallbackQueryHandler, Cont
 from flask import Flask, request
 import asyncio
 import nest_asyncio
+nest_asyncio.apply()
 
 # اعمال nest_asyncio برای حل مشکل حلقه رویداد
 nest_asyncio.apply()
