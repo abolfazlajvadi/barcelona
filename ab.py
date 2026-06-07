@@ -1,3 +1,6 @@
+import nest_asyncio
+nest_asyncio.apply()
+
 import sqlite3
 import random
 import string
@@ -5,20 +8,15 @@ from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes
 from flask import Flask, request
 import asyncio
-import nest_asyncio
-nest_asyncio.apply()
-
-# اعمال nest_asyncio برای حل مشکل حلقه رویداد
-nest_asyncio.apply()
 
 TOKEN = "8981742192:AAHC8z6u6GifXgMIafvzv0tn_Q2LV1mM2bQ"
-BASE_URL = "https://barcelona-l5tu.onrender.com"  # آدرس اصلی سرویس شما در Render
+BASE_URL = "https://barcelona-l5tu.onrender.com"  # آدرس درست، بدون /webhook
 CHANNELS = ["@film01385"]
 
 # Flask app
 flask_app = Flask(__name__)
 
-# ========== دیتابیس ==========
+# دیتابیس
 conn = sqlite3.connect("tracker.db", check_same_thread=False)
 c = conn.cursor()
 c.execute("""CREATE TABLE IF NOT EXISTS users (
@@ -41,7 +39,6 @@ def generate_link(telegram_id):
     conn.commit()
     return link
 
-# ========== توابع ربات ==========
 async def is_member(user_id):
     for channel in CHANNELS:
         try:
@@ -99,37 +96,26 @@ async def handle_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
 def webhook():
     try:
         update = Update.de_json(request.get_json(), application.bot)
-        # استفاده از asyncio.run برای اجرای تابع async
         asyncio.run(application.process_update(update))
         return "ok", 200
     except Exception as e:
-        print(f"خطا در وب‌هوک: {e}")
-        import traceback
-        traceback.print_exc()
+        print(f"خطا: {e}")
         return "error", 500
 
 @flask_app.route('/')
 def index():
-    return "ربات آنلاین است - نسخه Webhook"
+    return "ربات آنلاین است"
 
-@flask_app.route('/test')
-def test():
-    return "Webhook endpoint is working!", 200
+if __name__ == "__main__":
+    application = Application.builder().token(TOKEN).build()
+    application.add_handler(CommandHandler("start", start))
+    application.add_handler(CallbackQueryHandler(handle_buttons))
 
-# ========== ساخت اپلیکیشن تلگرام (قبل از وب هوک) ==========
-application = Application.builder().token(TOKEN).build()
-application.add_handler(CommandHandler("start", start))
-application.add_handler(CallbackQueryHandler(handle_buttons))
-
-# تنظیم Webhook (با یک حلقه رویداد جداگانه)
-async def setup_webhook():
-    await application.bot.set_webhook(url=f"{BASE_URL}/webhook")
+    # تنظیم Webhook
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    loop.run_until_complete(application.bot.set_webhook(url=f"{BASE_URL}/webhook"))
     print(f"✅ Webhook تنظیم شد: {BASE_URL}/webhook")
 
-# اجرای تنظیم Webhook
-loop = asyncio.new_event_loop()
-asyncio.set_event_loop(loop)
-loop.run_until_complete(setup_webhook())
-
-# Flask app بدون if __name__ برای Gunicorn
-# برنامه به صورت مستقیم توسط Gunicorn اجرا می‌شود
+    # اجرای Flask
+    flask_app.run(host="0.0.0.0", port=10000)
