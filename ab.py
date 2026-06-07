@@ -19,8 +19,8 @@ CHANNELS = ["@film01385"]
 # ---------- Flask ----------
 flask_app = Flask(__name__)
 
-# ---------- دیتابیس ----------
-conn = sqlite3.connect("tracker.db", check_same_thread=False)
+# ---------- دیتابیس (مسیر /tmp برای Render) ----------
+conn = sqlite3.connect("/tmp/tracker.db", check_same_thread=False)
 c = conn.cursor()
 c.execute("""CREATE TABLE IF NOT EXISTS users (
     telegram_id INTEGER PRIMARY KEY,
@@ -123,7 +123,9 @@ async def handle_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
 def webhook():
     try:
         update = Update.de_json(request.get_json(), application.bot)
-        asyncio.run(application.process_update(update))
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        loop.run_until_complete(application.process_update(update))
         return "ok", 200
     except Exception as e:
         print(f"Webhook error: {e}")
