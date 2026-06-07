@@ -11,6 +11,10 @@ from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 TOKEN = "8981742192:AAHC8z6u6GifXgMIafvzv0tn_Q2LV1mM2bQ"
 BASE_URL = "https://barcelona-l5tu.onrender.com"
 CHANNELS = ["@film01385"]
+CHANNEL_NAMES = {
+    "@film01385": "کانال اول",
+    "@channel2": "کانال دوم",
+}
 
 bot = telebot.TeleBot(TOKEN)
 app = Flask(__name__)
@@ -124,18 +128,20 @@ def start(message):
         show_panel(message.chat.id)
     else:
         keyboard = InlineKeyboardMarkup(row_width=1)
-        # هر کانال به صورت یک دکمه جداگانه
+        
         for channel in CHANNELS:
+            # استفاده از نام نمایشی اگر وجود دارد، در غیر این صورت همان یوزرنیم
+            display_name = CHANNEL_NAMES.get(channel, channel)
             keyboard.add(InlineKeyboardButton(
-                f"🔹 {channel}", 
-                url=f"https://t.me/{channel[1:]}"
+                f"🔹 {display_name}", 
+                url=f"https://t.me/{channel[1:]}"  # لینک همچنان با یوزرنیم واقعی کار می‌کند
             ))
-        # دکمه بررسی عضویت
+        
         keyboard.add(InlineKeyboardButton("✅ عضو شدم", callback_data="check_membership"))
         
         bot.reply_to(
             message,
-            "👋 **کاربر گرامی، برای دریافت فایل ابتدا در کانال های زیر عضو شوید:**",
+            "👋 **برای استفاده از ربات ابتدا در کانال های زیر عضو شوید :**",
             reply_markup=keyboard,
             parse_mode='Markdown'
         )
