@@ -4,10 +4,14 @@ import random
 import string
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes
+from flask import Flask, request
 
-TOKEN ="8981742192:AAHC8z6u6GifXgMIafvzv0tn_Q2LV1mM2bQ"  # 🔁 عوض کن
-BASE_URL = "https://your-domain.com"  # بعداً وقتی وب سرویس رو بردی رو Render، این رو عوض کن
-CHANNELS = ["@film01385"]  # 🔁 آیدی کانال‌هات رو اینجا بذار
+TOKEN = "توکن_ربات_تو"
+BASE_URL = "https://your-domain.com"  # آدرس Render شما (مثلاً https://bot.onrender.com)
+CHANNELS = ["@channel1", "@channel2"]
+
+# Flask app
+flask_app = Flask(__name__)
 
 # دیتابیس
 conn = sqlite3.connect("tracker.db", check_same_thread=False)
@@ -57,9 +61,9 @@ async def show_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [
         [InlineKeyboardButton("🔗 دریافت لینک من", callback_data="get_link")],
         [InlineKeyboardButton("💰 خرید اشتراک پرو", callback_data="buy_sub")],
-        [InlineKeyboardButton("🛡 خرید سپر (حفاظت و مچ‌گیری)", callback_data="buy_shield")],
-        [InlineKeyboardButton("🖼 تنظیم عکس مچ‌گیری", callback_data="set_photo")],
-        [InlineKeyboardButton("✏️ تنظیم متن مچ‌گیری", callback_data="set_text")],
+        [InlineKeyboardButton("🛡 خرید سپر", callback_data="buy_shield")],
+        [InlineKeyboardButton("🖼 تنظیم عکس", callback_data="set_photo")],
+        [InlineKeyboardButton("✏️ تنظیم متن", callback_data="set_text")],
         [InlineKeyboardButton("📖 راهنما", callback_data="help")]
     ]
     await update.message.reply_text(
@@ -84,13 +88,25 @@ async def handle_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         await query.edit_message_text("این بخش در حال توسعه است.")
 
-def main():
-    global application
+# ========== Webhook ==========
+@flask_app.route('/webhook', methods=['POST'])
+async def webhook():
+    update = Update.de_json(request.get_json(), application.bot)
+    await application.process_update(update)
+    return "ok", 200
+
+@flask_app.route('/')
+def index():
+    return "ربات آنلاین است"
+
+if __name__ == "__main__":
+    # ساخت اپلیکیشن تلگرام
     application = Application.builder().token(TOKEN).build()
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CallbackQueryHandler(handle_buttons))
-    print("✅ ربات روشن شد...")
-    application.run_polling()
 
-if __name__ == "__main__":
-    main()
+    # مقداردهی اولیه (برای Webhook نیازی به polling نیست)
+    application.bot.set_webhook(url=f"{BASE_URL}/webhook")
+
+    # اجرای Flask
+    flask_app.run(host="0.0.0.0", port=10000)
