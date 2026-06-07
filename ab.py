@@ -6,6 +6,7 @@ from datetime import datetime
 from flask import Flask, request, redirect, jsonify
 import telebot
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
+import threading
 
 # ---------- تنظیمات اولیه ----------
 TOKEN = "8981742192:AAHC8z6u6GifXgMIafvzv0tn_Q2LV1mM2bQ"
@@ -13,7 +14,6 @@ BASE_URL = "https://barcelona-l5tu.onrender.com"
 CHANNELS = ["@film01385"]
 CHANNEL_NAMES = {
     "@film01385": "کانال اول",
-    "@channel2": "کانال دوم",
 }
 
 bot = telebot.TeleBot(TOKEN)
@@ -26,14 +26,12 @@ user_link_messages = {}
 conn = sqlite3.connect("/tmp/tracker.db", check_same_thread=False)
 c = conn.cursor()
 
-# جدول کاربران و لینک‌ها
 c.execute("""CREATE TABLE IF NOT EXISTS users (
     telegram_id INTEGER PRIMARY KEY,
     link_code TEXT UNIQUE,
     link_full TEXT UNIQUE
 )""")
 
-# جدول کلیک‌ها
 c.execute("""CREATE TABLE IF NOT EXISTS clicks (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     link_code TEXT,
@@ -42,7 +40,6 @@ c.execute("""CREATE TABLE IF NOT EXISTS clicks (
     timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
 )""")
 
-# جدول تنظیمات کاربران (برای عکس و متن مچ‌گیری)
 c.execute("""CREATE TABLE IF NOT EXISTS user_settings (
     telegram_id INTEGER PRIMARY KEY,
     capture_text TEXT,
@@ -103,7 +100,7 @@ def is_user_member(user_id):
             return False
     return True
 
-# ---------- نمایش پنل کاربری (6 دکمه) ----------
+# ---------- نمایش پنل کاربری ----------
 def show_panel(chat_id, message_id=None):
     keyboard = InlineKeyboardMarkup(row_width=1)
     keyboard.add(InlineKeyboardButton("🔗 دریافت لینک من", callback_data="get_link"))
@@ -130,11 +127,10 @@ def start(message):
         keyboard = InlineKeyboardMarkup(row_width=1)
         
         for channel in CHANNELS:
-            # استفاده از نام نمایشی اگر وجود دارد، در غیر این صورت همان یوزرنیم
             display_name = CHANNEL_NAMES.get(channel, channel)
             keyboard.add(InlineKeyboardButton(
                 f"🔹 {display_name}", 
-                url=f"https://t.me/{channel[1:]}"  # لینک همچنان با یوزرنیم واقعی کار می‌کند
+                url=f"https://t.me/{channel[1:]}"
             ))
         
         keyboard.add(InlineKeyboardButton("✅ عضو شدم", callback_data="check_membership"))
@@ -161,22 +157,42 @@ def handle_buttons(call):
     
     elif call.data == "get_link":
         link = generate_link(user_id)
-        keyboard = InlineKeyboardMarkup()
-        keyboard.add(InlineKeyboardButton("🌐 باز کردن لینک", url=link))
+        link_code = link.split('/')[-1]
+        
+        keyboard = InlineKeyboardMarkup(row_width=2)
+        keyboard.add(
+            InlineKeyboardButton("📋 کپی لینک من", callback_data=f"copy_{link_code}"),
+            InlineKeyboardButton("🔒 مخفی کردن لینک", callback_data="hide_link")
+        )
         
         msg = bot.edit_message_text(
-            f"🔗 لینک اختصاصی شما:\n\n{link}\n\n"
+            f"🔗 **لینک اختصاصی شما:**\n\n"
+            f"`{link}`\n\n"
             "این لینک را در بیوگرافی یا جایی که می‌خواهید قرار دهید.\n"
-            "هر کس روی آن کلیک کند، در همین پیام برای شما گزارش می‌شود.",
+            "هر کس روی آن کلیک کند، برای شما گزارش می‌شود.",
             chat_id, call.message.message_id,
-            reply_markup=keyboard
+            reply_markup=keyboard,
+            parse_mode='Markdown'
         )
-        # ذخیره اطلاعات پیام برای به‌روزرسانی بعدی
+        
         user_link_messages[user_id] = {
             "chat_id": chat_id,
             "message_id": msg.message_id,
-            "link_code": link.split('/')[-1]
+            "link_code": link_code
         }
+    
+    elif call.data.startswith("copy_"):
+        link_code = call.data.split("_")[1]
+        link = f"{BASE_URL}/track/{link_code}"
+        bot.send_message(chat_id, f"🔗 لینک اختصاصی شما برای کپی:\n\n`{link}`", parse_mode='Markdown')
+        bot.answer_callback_query(call.id, "✅ لینک برای کپی ارسال شد!")
+    
+    elif call.data == "hide_link":
+        bot.edit_message_text(
+            "🔗 لینک شما مخفی شد. برای دریافت مجدد لینک، از پنل اصلی اقدام کنید.",
+            chat_id, call.message.message_id
+        )
+        threading.Timer(2.0, lambda: show_panel(chat_id)).start()
     
     elif call.data == "buy_sub":
         bot.answer_callback_query(call.id, "💰 بخش خرید اشتراک پرو در حال توسعه است.\nبه زودی...", show_alert=True)
@@ -211,11 +227,9 @@ def handle_buttons(call):
             "⚡ توجه: این ربات اطلاعات بازدید از پروفایل را نشان نمی‌دهد، بلکه فقط کلیک روی لینک را ثبت می‌کند."
         )
         bot.edit_message_text(help_text, chat_id, call.message.message_id, parse_mode='Markdown')
-        # نمایش دوباره پنل بعد از 5 ثانیه
-        import threading
         threading.Timer(5.0, lambda: show_panel(chat_id, call.message.message_id)).start()
 
-# ---------- دریافت متن مچ‌گیری از کاربر ----------
+# ---------- دریافت متن مچ‌گیری ----------
 def receive_capture_text(message):
     user_id = message.from_user.id
     chat_id = message.chat.id
@@ -225,7 +239,7 @@ def receive_capture_text(message):
     bot.send_message(chat_id, f"✅ متن مچ‌گیری شما با موفقیت ذخیره شد:\n\n{text}")
     show_panel(chat_id)
 
-# ---------- دریافت عکس مچ‌گیری از کاربر ----------
+# ---------- دریافت عکس مچ‌گیری ----------
 def receive_capture_photo(message):
     user_id = message.from_user.id
     chat_id = message.chat.id
@@ -261,13 +275,12 @@ def track_click(code):
               (code, ip_address, user_agent))
     conn.commit()
     
-    # به‌روزرسانی پیام لینک کاربر (اگر وجود داشته باشد)
     if user_a_id and user_a_id in user_link_messages:
         msg_info = user_link_messages[user_a_id]
         try:
             capture_text = get_user_capture_text(user_a_id)
             bot.edit_message_text(
-                f"🔗 لینک اختصاصی شما:\n\nhttps://t.me/.../{msg_info['link_code']}\n\n"
+                f"🔗 لینک اختصاصی شما:\n\n{msg_info['link_code']}\n\n"
                 "این لینک را در بیوگرافی خود قرار دهید.\n\n"
                 f"🎯 **{capture_text}**\n"
                 f"📅 زمان: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
@@ -276,7 +289,6 @@ def track_click(code):
         except Exception as e:
             print(f"Error updating message: {e}")
     
-    # ارسال پیام خصوصی به کاربر
     if user_a_id:
         try:
             capture_text = get_user_capture_text(user_a_id)
@@ -306,7 +318,6 @@ def health():
 def index():
     return "ربات آنلاین است", 200
 
-# ---------- تنظیم Webhook ----------
 def set_webhook():
     webhook_url = f"{BASE_URL}/webhook"
     result = bot.set_webhook(url=webhook_url)
@@ -315,7 +326,6 @@ def set_webhook():
     else:
         print("❌ Failed to set webhook")
 
-# ---------- اجرا ----------
 if __name__ == '__main__':
     set_webhook()
     app.run(host='0.0.0.0', port=10000)
