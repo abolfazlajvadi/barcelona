@@ -7,7 +7,7 @@ from telegram.ext import Application, CommandHandler, CallbackQueryHandler, Cont
 from flask import Flask, request
 
 TOKEN = "8981742192:AAHC8z6u6GifXgMIafvzv0tn_Q2LV1mM2bQ"
-BASE_URL = "https://barcelona-l5tu.onrender.com"  # آدرس Render شما (مثلاً https://bot.onrender.com)
+BASE_URL = "https://barcelona-l5tu.onrender.com/webhook"  # آدرس Render شما (مثلاً https://bot.onrender.com)
 CHANNELS = ["@film01385"]
 
 # Flask app
