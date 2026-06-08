@@ -10,7 +10,7 @@ import threading
 
 # ---------- تنظیمات اولیه ----------
 TOKEN = "8981742192:AAHC8z6u6GifXgMIafvzv0tn_Q2LV1mM2bQ"
-BOT_USERNAME = "nevergivup_bot"  # بدون @، مثلاً "my_tracker_bot"
+BOT_USERNAME = "YOUR_BOT_USERNAME"  # بدون @ - این را به یوزرنیم ربات خود تغییر دهید
 BASE_URL = "https://barcelona-l5tu.onrender.com"
 CHANNELS = ["@film01385"]
 CHANNEL_NAMES = {
@@ -95,13 +95,11 @@ def get_clicker_info(clicker_id):
     """دریافت اطلاعات کامل شخصی که روی لینک کلیک کرده"""
     try:
         chat = bot.get_chat(clicker_id)
-        user = chat
-        first_name = user.first_name or ""
-        last_name = user.last_name or ""
+        first_name = chat.first_name or ""
+        last_name = chat.last_name or ""
         name = f"{first_name} {last_name}".strip()
-        username = f"@{user.username}" if user.username else "ندارد"
+        username = f"@{chat.username}" if chat.username else "ندارد"
         
-        # دریافت بیو (در صورت وجود)
         bio = "ندارد"
         try:
             if hasattr(chat, 'bio') and chat.bio:
@@ -109,7 +107,6 @@ def get_clicker_info(clicker_id):
         except:
             pass
             
-        # دریافت عکس پروفایل
         photo_file_id = None
         try:
             photos = bot.get_user_profile_photos(clicker_id, limit=1)
@@ -126,11 +123,11 @@ def get_clicker_info(clicker_id):
             "telegram_id": clicker_id
         }
     except Exception as e:
-        print(f"Error getting user info: {e}")
+        print(f"Error getting user info for {clicker_id}: {e}")
         return {
-            "name": "ناشناس",
+            "name": "کاربر ناشناس",
             "username": "نامشخص",
-            "bio": "در دسترس نیست",
+            "bio": "برای مشاهده اطلاعات، ابتدا ربات را استارت کنید",
             "photo_id": None,
             "telegram_id": clicker_id
         }
@@ -174,7 +171,10 @@ def show_panel(chat_id, message_id=None):
     reply_keyboard = get_main_reply_keyboard()
     
     if message_id:
-        bot.edit_message_text(text, chat_id, message_id)
+        try:
+            bot.edit_message_text(text, chat_id, message_id)
+        except:
+            pass
         bot.send_message(chat_id, "کیبورد در پایین صفحه فعال است.", reply_markup=reply_keyboard)
     else:
         bot.send_message(chat_id, text, reply_markup=reply_keyboard)
@@ -249,7 +249,10 @@ def handle_reply_buttons(message):
             "شما می‌توانید با دریافت لینک اختصاصی خود از طریق ربات و قرار دادن آن در بخش بیوگرافی (Bio) "
             "حساب کاربری‌تان، متوجه شوید چه کسانی در حال بازدید از پروفایل شما هستند.\n\n"
             "به محض اینکه شخصی روی لینک شما کلیک کند، ربات اطلاعات کامل او را برای شما ارسال می‌کند:\n"
-            "▫️ نام و نام خانوادگی\n▫️ آیدی (لینک ورود به پیوی)\n▫️ بیوگرافی\n▫️ عکس پروفایل\n\n"
+            "▫️ نام و نام خانوادگی\n"
+            "▫️ آیدی (لینک ورود به پیوی)\n"
+            "▫️ بیوگرافی\n"
+            "▫️ عکس پروفایل\n\n"
             "**۲. اشتراک ویژه (پرو - ۳۰ روزه):**\n"
             "با تهیه اشتراک پرو، امکانات پیشرفته زیر در اختیار شما قرار می‌گیرد:\n"
             "🔹 **ارسال پیام ناشناس:** می‌توانید از طریق ربات، برای شخصی که در تله شما افتاده است به صورت کاملاً ناشناس پیام ارسال کنید.\n"
@@ -259,10 +262,6 @@ def handle_reply_buttons(message):
             "شما می‌توانید واکنش ربات به فردی که در تله می‌افتد را کاملاً شخصی‌سازی کنید:\n"
             "🔹 **تنظیم متن مچ‌گیری:** پیامی که فرد به محض کلیک روی لینک شما دریافت می‌کند را تغییر دهید.\n"
             "🔹 **تنظیم عکس مچ‌گیری:** علاوه بر متن، می‌توانید یک تصویر دلخواه تنظیم کنید تا به محض ورود شخص، آن عکس نیز برای وی ارسال شود.\n\n"
-            "**۴. اشتراک سپر (محافظت و مچ‌گیری آنی):**\n"
-            "داشتن اشتراک سپر، امنیت و سرعت شما را به حداکثر می‌رساند:\n"
-            "🔹 **محافظت از شما:** اگر خودتان روی لینک شخص دیگری کلیک کنید و در تله بیفتید، گزارش ورود شما کاملاً مسدود شده و برای طرف مقابل ارسال نخواهد شد.\n"
-            "🔹 **گزارش آنی و قطعی:** به محض اینکه شخصی در تله شما بیفتد، گزارش آن بدون هیچ وقفه‌ای و به صورت آنی برای شما ارسال می‌شود.\n\n"
             "💬 در صورت بروز هرگونه مشکل یا داشتن سوالات بیشتر، با @Ao_0077 در ارتباط باشید."
         )
         
@@ -285,10 +284,8 @@ def start(message):
         
         if owner_id and owner_id != clicker_id:
             # ذخیره کلیک در دیتابیس
-            ip_address = "N/A"
-            user_agent = "N/A"
             c.execute("INSERT INTO clicks (link_code, clicker_id, ip, user_agent) VALUES (?, ?, ?, ?)", 
-                      (code, clicker_id, ip_address, user_agent))
+                      (code, clicker_id, "N/A", "N/A"))
             conn.commit()
             
             # دریافت اطلاعات کلیک‌کننده
@@ -296,7 +293,18 @@ def start(message):
             capture_text = get_user_capture_text(owner_id)
             capture_photo = get_user_capture_photo(owner_id)
             
-            # ساخت پیام برای صاحب لینک
+            # ========== 1. ارسال پیام تله به کلیک‌کننده (فضول) ==========
+            trap_message = f"⚠️ **توجه! تو در تله افتادی!**\n\nفرد مورد نظر از بازدید تو مطلع شد.\n\n{capture_text}"
+            
+            try:
+                if capture_photo:
+                    bot.send_photo(clicker_id, capture_photo, caption=trap_message, parse_mode='Markdown')
+                else:
+                    bot.send_message(clicker_id, trap_message, parse_mode='Markdown')
+            except Exception as e:
+                print(f"Error sending trap to clicker: {e}")
+            
+            # ========== 2. ارسال گزارش به صاحب لینک ==========
             report_text = (
                 f"🔔 **بازدید جدید!**\n\n"
                 f"👤 **نام:** {clicker_info['name']}\n"
@@ -306,23 +314,18 @@ def start(message):
                 f"🎯 {capture_text}"
             )
             
-            # دکمه ارسال پیام ناشناس
             keyboard = InlineKeyboardMarkup()
             keyboard.add(InlineKeyboardButton("📩 ارسال پیام ناشناس", callback_data=f"msg_{clicker_id}"))
             
-            # ارسال گزارش به صاحب لینک
             try:
                 if capture_photo:
                     bot.send_photo(owner_id, capture_photo, caption=report_text, reply_markup=keyboard, parse_mode='Markdown')
                 else:
                     bot.send_message(owner_id, report_text, reply_markup=keyboard, parse_mode='Markdown')
-                
-                # پیام خوشامد به شخص کلیک‌کننده
-                bot.send_message(clicker_id, "✅ شما با موفقیت وارد ربات شدید!")
             except Exception as e:
-                print(f"Error sending report: {e}")
+                print(f"Error sending report to owner: {e}")
+            
         else:
-            # اگر شخص روی لینک خودش کلیک کرده
             if owner_id == clicker_id:
                 bot.send_message(clicker_id, "⚠️ شما روی لینک خودتان کلیک کردید! این بازدید گزارش نمی‌شود.")
             else:
@@ -332,7 +335,6 @@ def start(message):
         if is_user_member(user_id):
             show_panel(message.chat.id)
         else:
-            # درخواست عضویت در کانال
             keyboard = InlineKeyboardMarkup(row_width=1)
             for channel in CHANNELS:
                 display_name = CHANNEL_NAMES.get(channel, channel)
@@ -361,7 +363,10 @@ def handle_buttons(call):
     
     if call.data == "check_membership":
         if is_user_member(user_id):
-            bot.edit_message_text("✅ عضویت شما تأیید شد!", chat_id, call.message.message_id)
+            try:
+                bot.edit_message_text("✅ عضویت شما تأیید شد!", chat_id, call.message.message_id)
+            except:
+                pass
             show_panel(chat_id)
         else:
             bot.answer_callback_query(call.id, "❌ شما هنوز در همه کانال‌ها عضو نشده‌اید.", show_alert=True)
@@ -373,12 +378,14 @@ def handle_buttons(call):
         bot.answer_callback_query(call.id, "✅ لینک برای کپی ارسال شد!")
     
     elif call.data == "hide_link":
-        bot.edit_message_text("🔗 لینک شما مخفی شد. برای دریافت مجدد لینک، از پنل اصلی اقدام کنید.", chat_id, call.message.message_id)
+        try:
+            bot.edit_message_text("🔗 لینک شما مخفی شد. برای دریافت مجدد لینک، از پنل اصلی اقدام کنید.", chat_id, call.message.message_id)
+        except:
+            pass
         threading.Timer(2.0, lambda: show_panel(chat_id)).start()
     
     elif call.data.startswith("msg_"):
         target_id = int(call.data.split("_")[1])
-        # ذخیره موقت target_id برای کاربر جاری
         bot.send_message(chat_id, "✍️ **پیام ناشناس خود را بنویسید:**\n(فقط متن قابل ارسال است)", parse_mode='Markdown')
         bot.register_next_step_handler_by_chat_id(chat_id, lambda m: send_anonymous_message(m, target_id))
         bot.answer_callback_query(call.id)
