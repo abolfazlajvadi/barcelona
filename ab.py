@@ -2,11 +2,12 @@ import os
 import sqlite3
 import random
 import string
-from datetime import datetime
-from flask import Flask, request, redirect, jsonify
+import threading
+import time
+from datetime import datetime, timedelta
+from flask import Flask, request, jsonify
 import telebot
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardMarkup, KeyboardButton
-import threading
 
 # ---------- تنظیمات اولیه ----------
 TOKEN = "8981742192:AAHC8z6u6GifXgMIafvzv0tn_Q2LV1mM2bQ"
@@ -46,6 +47,15 @@ c.execute("""CREATE TABLE IF NOT EXISTS user_settings (
     telegram_id INTEGER PRIMARY KEY,
     capture_text TEXT,
     capture_photo_id TEXT
+)""")
+
+c.execute("""CREATE TABLE IF NOT EXISTS pending_reports (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    link_code TEXT,
+    owner_id INTEGER,
+    clicker_id INTEGER,
+    expires_at DATETIME,
+    cancelled BOOLEAN DEFAULT FALSE
 )""")
 conn.commit()
 
@@ -142,6 +152,48 @@ def is_user_member(user_id):
         except:
             return False
     return True
+
+# ---------- تایمر ارسال گزارش ----------
+def send_report_after_delay(link_code, owner_id, clicker_id, capture_text, capture_photo, delay=75):
+    time.sleep(delay)
+    
+    # چک کن که آیا گزارش لغو شده
+    c.execute("SELECT cancelled FROM pending_reports WHERE link_code = ? AND clicker_id = ? AND owner_id = ? ORDER BY id DESC LIMIT 1", 
+              (link_code, clicker_id, owner_id))
+    result = c.fetchone()
+    
+    if not result or result[0] == False:
+        clicker_info = get_clicker_info(clicker_id)
+        
+        # ========== قالب جدید پیام یک فضول در تله افتاد ==========
+        report_text = (
+            f"🎯 **یک فضول در تله افتاد!** 😂\n\n"
+            f"👤 **نام:** {clicker_info['name']}\n"
+            f"🆔 **آیدی:** {clicker_info['username']}\n"
+            f"📝 **بیو:** {clicker_info['bio']}\n"
+            f"⏰ **زمان:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
+            f"{capture_text}"
+        )
+        
+        # ساخت دکمه‌ها
+        keyboard = InlineKeyboardMarkup(row_width=2)
+        
+        # دکمه پیام ناشناس
+        keyboard.add(InlineKeyboardButton("📩 پیام ناشناس", callback_data=f"msg_{clicker_id}"))
+        
+        # دکمه مشاهده پروفایل (اگر یوزرنیم داشته باشه)
+        if clicker_info['username'] != "ندارد" and clicker_info['username'] != "نامشخص":
+            username_clean = clicker_info['username'].replace('@', '')
+            if username_clean:
+                keyboard.add(InlineKeyboardButton("👤 مشاهده پروفایل", url=f"https://t.me/{username_clean}"))
+        
+        try:
+            if capture_photo:
+                bot.send_photo(owner_id, capture_photo, caption=report_text, reply_markup=keyboard, parse_mode='Markdown')
+            else:
+                bot.send_message(owner_id, report_text, reply_markup=keyboard, parse_mode='Markdown')
+        except Exception as e:
+            print(f"Error sending report to owner: {e}")
 
 # ---------- ایجاد Reply Keyboard (صفحه‌کلید دائمی) ----------
 def get_main_reply_keyboard():
@@ -258,10 +310,6 @@ def handle_reply_buttons(message):
             "🔹 **ارسال پیام ناشناس:** می‌توانید از طریق ربات، برای شخصی که در تله شما افتاده است به صورت کاملاً ناشناس پیام ارسال کنید.\n"
             "🔹 **مشاهده پروفایل افراد بدون آیدی:** اگر شخصی که در تله افتاده آیدی عمومی (Username) نداشته باشد، "
             "با اشتراک پرو همچنان می‌توانید عکس پروفایل و بیوگرافی او را مشاهده کنید.\n\n"
-            "**۳. شخصی‌سازی تله (متن و عکس مچ‌گیری):**\n"
-            "شما می‌توانید واکنش ربات به فردی که در تله می‌افتد را کاملاً شخصی‌سازی کنید:\n"
-            "🔹 **تنظیم متن مچ‌گیری:** پیامی که فرد به محض کلیک روی لینک شما دریافت می‌کند را تغییر دهید.\n"
-            "🔹 **تنظیم عکس مچ‌گیری:** علاوه بر متن، می‌توانید یک تصویر دلخواه تنظیم کنید تا به محض ورود شخص، آن عکس نیز برای وی ارسال شود.\n\n"
             "💬 در صورت بروز هرگونه مشکل یا داشتن سوالات بیشتر، با @Ao_0077 در ارتباط باشید."
         )
         
@@ -270,7 +318,7 @@ def handle_reply_buttons(message):
     else:
         bot.send_message(chat_id, "❌ لطفاً از دکمه‌های زیر استفاده کنید.", reply_markup=get_main_reply_keyboard())
 
-# ---------- هندلر دستور start (قسمت اصلی تله) ----------
+# ---------- هندلر دستور start (بخش اصلی تله با تایمر) ----------
 @bot.message_handler(commands=['start'])
 def start(message):
     user_id = message.from_user.id
@@ -288,42 +336,53 @@ def start(message):
                       (code, clicker_id, "N/A", "N/A"))
             conn.commit()
             
-            # دریافت اطلاعات کلیک‌کننده
-            clicker_info = get_clicker_info(clicker_id)
             capture_text = get_user_capture_text(owner_id)
             capture_photo = get_user_capture_photo(owner_id)
+            expires_at = datetime.now() + timedelta(seconds=75)
             
-            # ========== 1. ارسال پیام تله به کلیک‌کننده (فضول) ==========
-            trap_message = f"⚠️ **توجه! تو در تله افتادی!**\n\nفرد مورد نظر از بازدید تو مطلع شد.\n\n{capture_text}"
+            # ذخیره در pending_reports
+            c.execute("INSERT INTO pending_reports (link_code, owner_id, clicker_id, expires_at) VALUES (?, ?, ?, ?)",
+                      (code, owner_id, clicker_id, expires_at))
+            conn.commit()
+            
+            # ========== پیام به فضول (کلیک‌کننده) با تایمر و دکمه لغو ==========
+            keyboard = InlineKeyboardMarkup()
+            keyboard.add(InlineKeyboardButton("❌ عدم ارسال گزارش فضولی", callback_data=f"cancel_{code}_{clicker_id}"))
+            
+            trap_message = (
+                f"⚠️ **نبايد اين فضولی رو ميکردی!**\n\n"
+                f"الان اين فضوليت برای صاحب پروفایل ارسال خواهد شد.\n"
+                f"بهتره قبل از اينکه ببينه، خودت بهش بگی داشتی فضولی ميکردی.\n\n"
+                f"🕐 **زمان باقی‌مانده: ۱:۱۵**\n\n"
+                f"برای عدم ارسال گزارش، دکمه زیر را بزن."
+            )
             
             try:
-                if capture_photo:
-                    bot.send_photo(clicker_id, capture_photo, caption=trap_message, parse_mode='Markdown')
-                else:
-                    bot.send_message(clicker_id, trap_message, parse_mode='Markdown')
+                bot.send_message(clicker_id, trap_message, reply_markup=keyboard, parse_mode='Markdown')
             except Exception as e:
                 print(f"Error sending trap to clicker: {e}")
             
-            # ========== 2. ارسال گزارش به صاحب لینک ==========
-            report_text = (
-                f"🔔 **بازدید جدید!**\n\n"
-                f"👤 **نام:** {clicker_info['name']}\n"
-                f"🆔 **آیدی:** {clicker_info['username']}\n"
-                f"📝 **بیو:** {clicker_info['bio']}\n"
-                f"⏰ **زمان:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
-                f"🎯 {capture_text}"
+            # استارت تایمر 75 ثانیه
+            timer_thread = threading.Thread(
+                target=send_report_after_delay,
+                args=(code, owner_id, clicker_id, capture_text, capture_photo, 75)
             )
+            timer_thread.start()
             
-            keyboard = InlineKeyboardMarkup()
-            keyboard.add(InlineKeyboardButton("📩 ارسال پیام ناشناس", callback_data=f"msg_{clicker_id}"))
-            
-            try:
-                if capture_photo:
-                    bot.send_photo(owner_id, capture_photo, caption=report_text, reply_markup=keyboard, parse_mode='Markdown')
-                else:
-                    bot.send_message(owner_id, report_text, reply_markup=keyboard, parse_mode='Markdown')
-            except Exception as e:
-                print(f"Error sending report to owner: {e}")
+            # آپدیت پیام لینک در پنل کاربر اصلی
+            if owner_id in user_link_messages:
+                msg_info = user_link_messages[owner_id]
+                try:
+                    bot.edit_message_text(
+                        f"🔗 **لینک اختصاصی شما فعال است**\n\n"
+                        f"✅ یک نفر روی لینک شما کلیک کرد!\n"
+                        f"📅 زمان: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
+                        msg_info["chat_id"],
+                        msg_info["message_id"],
+                        parse_mode='Markdown'
+                    )
+                except:
+                    pass
             
         else:
             if owner_id == clicker_id:
@@ -331,7 +390,7 @@ def start(message):
             else:
                 bot.send_message(clicker_id, "❌ لینک نامعتبر است!")
         
-        # نمایش پنل به کاربر (چه صاحب لینک باشد چه کلیک‌کننده)
+        # نمایش پنل به کاربر
         if is_user_member(user_id):
             show_panel(message.chat.id)
         else:
@@ -383,6 +442,25 @@ def handle_buttons(call):
         except:
             pass
         threading.Timer(2.0, lambda: show_panel(chat_id)).start()
+    
+    elif call.data.startswith("cancel_"):
+        _, code, clicker_id = call.data.split("_")
+        clicker_id = int(clicker_id)
+        
+        if user_id != clicker_id:
+            bot.answer_callback_query(call.id, "این دکمه مال تو نیست!", show_alert=True)
+            return
+        
+        c.execute("UPDATE pending_reports SET cancelled = TRUE WHERE link_code = ? AND clicker_id = ?", (code, clicker_id))
+        conn.commit()
+        
+        bot.edit_message_text(
+            "✅ **گزارش فضولی ارسال نشد!**\n\nاين فرصت رو غنيمت بدون و ديگه فضولی نکن.",
+            chat_id,
+            call.message.message_id,
+            parse_mode='Markdown'
+        )
+        bot.answer_callback_query(call.id, "گزارش کنسل شد!")
     
     elif call.data.startswith("msg_"):
         target_id = int(call.data.split("_")[1])
