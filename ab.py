@@ -13,6 +13,9 @@ BASE_URL = "https://barcelona-l5tu.onrender.com"
 bot = telebot.TeleBot(TOKEN)
 app = Flask(__name__)
 
+# ---------- دیکشنری برای ذخیره موقت لینک کاربران (برای حالت ری‌تای) ----------
+user_pending_link = {}
+
 # ---------- دیتابیس ----------
 conn = sqlite3.connect("/tmp/tracker.db", check_same_thread=False)
 c = conn.cursor()
@@ -63,30 +66,20 @@ def get_clicker_name(clicker_id):
         return "کاربر ناشناس"
 
 def delete_message_later(chat_id, message_id, delay, clicker_id, owner_name):
-    """حذف پیام تله بعد از زمان مشخص و ارسال پیام جدید"""
     time.sleep(delay)
-    
     try:
-        # حذف پیام قبلی
         bot.delete_message(chat_id, message_id)
     except:
         pass
     
-    # پیام جدید که به کاربر می‌گه فضولی کردی و کاربر فهمید
-    final_message = (
-        f"😅 **فضولی کردی و {owner_name} فهمید!**\n\n"
-        f"دیگه این کارو نکن 😊"
-    )
-    
+    final_message = f"😅 **فضولی کردی و {owner_name} فهمید!**\n\nدیگه این کارو نکن 😊"
     try:
         bot.send_message(chat_id, final_message, parse_mode='Markdown')
     except:
         pass
 
 def send_report_after_delay(link_code, owner_id, clicker_id, delay=75):
-    """ارسال گزارش به صاحب لینک بعد از تاخیر"""
     time.sleep(delay)
-    
     c.execute("SELECT cancelled FROM pending_reports WHERE link_code = ? AND clicker_id = ? AND owner_id = ? ORDER BY id DESC LIMIT 1", 
               (link_code, clicker_id, owner_id))
     result = c.fetchone()
@@ -94,7 +87,6 @@ def send_report_after_delay(link_code, owner_id, clicker_id, delay=75):
     if not result or result[0] == False:
         clicker_name = get_clicker_name(clicker_id)
         report_msg = f"🎯 **یک فضول در تله افتاد!**\n\n👤 نام: {clicker_name}\n⏰ زمان: {datetime.now().strftime('%H:%M:%S')}"
-        
         try:
             bot.send_message(owner_id, report_msg, parse_mode='Markdown')
         except:
@@ -106,6 +98,7 @@ def start(message):
     user_id = message.from_user.id
     text = message.text
     
+    # حالت اول: کاربر از طریق لینک اختصاصی آمده
     if text.startswith("/start track_"):
         code = text.split("track_")[1]
         owner_id = get_owner_id_by_code(code)
@@ -114,11 +107,9 @@ def start(message):
         if owner_id and owner_id != clicker_id:
             owner_name = get_owner_name(owner_id)
             
-            # ========== دکمه لغو گزارش ==========
             keyboard = InlineKeyboardMarkup()
             keyboard.add(InlineKeyboardButton("❌ عدم ارسال گزارش فضولی", callback_data=f"cancel_{code}_{clicker_id}"))
             
-            # ========== پیام تله به کلیک‌کننده ==========
             trap_message = (
                 f"⚠️ **نبايد اين فضولی رو ميکردی!** 🥰\n\n"
                 f"الان اين فضوليت برای {owner_name} ارسال شد، "
@@ -129,29 +120,23 @@ def start(message):
             
             msg = bot.send_message(clicker_id, trap_message, reply_markup=keyboard, parse_mode='Markdown')
             
-            # ذخیره در pending_reports
             c.execute("INSERT INTO pending_reports (link_code, owner_id, clicker_id, message_id, expires_at) VALUES (?, ?, ?, ?, ?)",
                       (code, owner_id, clicker_id, msg.message_id, datetime.now() + timedelta(seconds=75)))
             conn.commit()
             
-            # ========== تایمر برای حذف پیام تله ==========
-            delete_thread = threading.Thread(
-                target=delete_message_later,
-                args=(clicker_id, msg.message_id, 75, clicker_id, owner_name)
-            )
-            delete_thread.start()
-            
-            # ========== تایمر برای ارسال گزارش به صاحب لینک ==========
-            report_thread = threading.Thread(
-                target=send_report_after_delay,
-                args=(code, owner_id, clicker_id, 75)
-            )
-            report_thread.start()
+            threading.Thread(target=delete_message_later, args=(clicker_id, msg.message_id, 75, clicker_id, owner_name)).start()
+            threading.Thread(target=send_report_after_delay, args=(code, owner_id, clicker_id, 75)).start()
             
         elif owner_id == clicker_id:
             bot.send_message(clicker_id, "⚠️ این لینک مال خودته!")
         else:
             bot.send_message(clicker_id, "❌ لینک نامعتبر!")
+    
+    # حالت دوم: کاربر start ساده زده (تلگرام پارامتر را حذف کرده)
+    elif text == "/start":
+        # پیام خوش‌آمدگویی ساده
+        bot.send_message(user_id, "👋 به ربات خوش آمدی.\nبرای دریافت لینک /link رو بفرست.")
+    
     else:
         bot.send_message(user_id, "👋 به ربات خوش آمدی.\nبرای دریافت لینک /link رو بفرست.")
 
@@ -175,13 +160,11 @@ def cancel_report(call):
     c.execute("UPDATE pending_reports SET cancelled = TRUE WHERE link_code = ? AND clicker_id = ?", (code, clicker_id))
     conn.commit()
     
-    # حذف پیام تله
     try:
         bot.delete_message(call.message.chat.id, call.message.message_id)
     except:
         pass
     
-    # پیام تأیید
     bot.send_message(
         call.message.chat.id,
         "✅ **گزارش فضولی ارسال نشد!**\n\nاين فرصت رو غنيمت بدون و ديگه فضولی نکن.",
