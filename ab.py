@@ -165,7 +165,7 @@ def send_report_after_delay(link_code, owner_id, clicker_id, capture_text, captu
     if not result or result[0] == False:
         clicker_info = get_clicker_info(clicker_id)
         
-        # ========== قالب جدید پیام یک فضول در تله افتاد ==========
+        # ========== قالب پیام برای صاحب لینک ==========
         report_text = (
             f"🎯 **یک فضول در تله افتاد!** 😂\n\n"
             f"👤 **نام:** {clicker_info['name']}\n"
@@ -177,11 +177,8 @@ def send_report_after_delay(link_code, owner_id, clicker_id, capture_text, captu
         
         # ساخت دکمه‌ها
         keyboard = InlineKeyboardMarkup(row_width=2)
-        
-        # دکمه پیام ناشناس
         keyboard.add(InlineKeyboardButton("📩 پیام ناشناس", callback_data=f"msg_{clicker_id}"))
         
-        # دکمه مشاهده پروفایل (اگر یوزرنیم داشته باشه)
         if clicker_info['username'] != "ندارد" and clicker_info['username'] != "نامشخص":
             username_clean = clicker_info['username'].replace('@', '')
             if username_clean:
@@ -300,17 +297,10 @@ def handle_reply_buttons(message):
             "**۱. نحوه کارکرد ربات (سیستم مچ‌گیری):**\n"
             "شما می‌توانید با دریافت لینک اختصاصی خود از طریق ربات و قرار دادن آن در بخش بیوگرافی (Bio) "
             "حساب کاربری‌تان، متوجه شوید چه کسانی در حال بازدید از پروفایل شما هستند.\n\n"
-            "به محض اینکه شخصی روی لینک شما کلیک کند، ربات اطلاعات کامل او را برای شما ارسال می‌کند:\n"
-            "▫️ نام و نام خانوادگی\n"
-            "▫️ آیدی (لینک ورود به پیوی)\n"
-            "▫️ بیوگرافی\n"
-            "▫️ عکس پروفایل\n\n"
-            "**۲. اشتراک ویژه (پرو - ۳۰ روزه):**\n"
-            "با تهیه اشتراک پرو، امکانات پیشرفته زیر در اختیار شما قرار می‌گیرد:\n"
-            "🔹 **ارسال پیام ناشناس:** می‌توانید از طریق ربات، برای شخصی که در تله شما افتاده است به صورت کاملاً ناشناس پیام ارسال کنید.\n"
-            "🔹 **مشاهده پروفایل افراد بدون آیدی:** اگر شخصی که در تله افتاده آیدی عمومی (Username) نداشته باشد، "
-            "با اشتراک پرو همچنان می‌توانید عکس پروفایل و بیوگرافی او را مشاهده کنید.\n\n"
-            "💬 در صورت بروز هرگونه مشکل یا داشتن سوالات بیشتر، با @Ao_0077 در ارتباط باشید."
+            "به محض اینکه شخصی روی لینک شما کلیک کند، ربات اطلاعات کامل او را برای شما ارسال می‌کند.\n\n"
+            "**۲. شخصی‌سازی تله (متن و عکس مچ‌گیری):**\n"
+            "شما می‌توانید واکنش ربات به فردی که در تله می‌افتد را کاملاً شخصی‌سازی کنید.\n\n"
+            "💬 در صورت بروز هرگونه مشکل، با @Ao_0077 در ارتباط باشید."
         )
         
         bot.send_message(chat_id, help_text, parse_mode='Markdown')
@@ -318,7 +308,7 @@ def handle_reply_buttons(message):
     else:
         bot.send_message(chat_id, "❌ لطفاً از دکمه‌های زیر استفاده کنید.", reply_markup=get_main_reply_keyboard())
 
-# ---------- هندلر دستور start (بخش اصلی تله با تایمر) ----------
+# ---------- هندلر دستور start (بخش اصلی تله) ----------
 @bot.message_handler(commands=['start'])
 def start(message):
     user_id = message.from_user.id
@@ -345,7 +335,7 @@ def start(message):
                       (code, owner_id, clicker_id, expires_at))
             conn.commit()
             
-            # ========== پیام به فضول (کلیک‌کننده) با تایمر و دکمه لغو ==========
+            # ========== پیام به فضول (کلیک‌کننده) ==========
             keyboard = InlineKeyboardMarkup()
             keyboard.add(InlineKeyboardButton("❌ عدم ارسال گزارش فضولی", callback_data=f"cancel_{code}_{clicker_id}"))
             
@@ -389,21 +379,8 @@ def start(message):
                 bot.send_message(clicker_id, "⚠️ شما روی لینک خودتان کلیک کردید! این بازدید گزارش نمی‌شود.")
             else:
                 bot.send_message(clicker_id, "❌ لینک نامعتبر است!")
-        
-        # نمایش پنل به کاربر
-        if is_user_member(user_id):
-            show_panel(message.chat.id)
-        else:
-            keyboard = InlineKeyboardMarkup(row_width=1)
-            for channel in CHANNELS:
-                display_name = CHANNEL_NAMES.get(channel, channel)
-                keyboard.add(InlineKeyboardButton(f"🔹 {display_name}", url=f"https://t.me/{channel[1:]}"))
-            keyboard.add(InlineKeyboardButton("✅ عضو شدم", callback_data="check_membership"))
-            bot.reply_to(message, "👋 برای استفاده از ربات ابتدا در کانال های زیر عضو شوید:", reply_markup=keyboard)
-        
-        return
     
-    # start معمولی (بدون کد)
+    # نمایش پنل به کاربر (بعد از پردازش لینک یا استارت معمولی)
     if is_user_member(user_id):
         show_panel(message.chat.id)
     else:
