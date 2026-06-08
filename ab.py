@@ -67,7 +67,8 @@ def get_ip():
     return request.remote_addr
 
 def generate_link(telegram_id):
-    code = ''.join(random.choices(string.ascii_letters + string.digits, k=10))
+    # استفاده از آیدی عددی ثابت کاربر (همیشه یکسان)
+    code = str(telegram_id)
     full_link = f"https://t.me/{BOT_USERNAME}?start=track_{code}"
     c.execute("INSERT OR REPLACE INTO users (telegram_id, link_code, link_full) VALUES (?, ?, ?)", 
               (telegram_id, code, full_link))
@@ -75,9 +76,14 @@ def generate_link(telegram_id):
     return full_link
 
 def get_owner_id_by_code(code):
-    c.execute("SELECT telegram_id FROM users WHERE link_code = ?", (code,))
-    result = c.fetchone()
-    return result[0] if result else None
+    # کد همان آیدی عددی کاربر است
+    try:
+        return int(code)
+    except:
+        # برای سازگاری با لینک‌های قدیمی
+        c.execute("SELECT telegram_id FROM users WHERE link_code = ?", (code,))
+        result = c.fetchone()
+        return result[0] if result else None
 
 def get_user_capture_text(user_id):
     c.execute("SELECT capture_text FROM user_settings WHERE telegram_id = ?", (user_id,))
@@ -250,7 +256,7 @@ def handle_reply_buttons(message):
     
     if text == "🔗 دریافت لینک من":
         link = generate_link(user_id)
-        link_code = link.split('_')[-1]
+        link_code = link.split('track_')[-1]
         
         inline_keyboard = InlineKeyboardMarkup(row_width=2)
         inline_keyboard.add(
