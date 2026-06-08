@@ -25,6 +25,7 @@ c.execute("""CREATE TABLE IF NOT EXISTS pending_reports (
     link_code TEXT,
     owner_id INTEGER,
     clicker_id INTEGER,
+    message_id INTEGER,
     expires_at DATETIME,
     cancelled BOOLEAN DEFAULT FALSE
 )""")
@@ -61,7 +62,29 @@ def get_clicker_name(clicker_id):
     except:
         return "کاربر ناشناس"
 
+def delete_message_later(chat_id, message_id, delay, clicker_id, owner_name):
+    """حذف پیام تله بعد از زمان مشخص و ارسال پیام جدید"""
+    time.sleep(delay)
+    
+    try:
+        # حذف پیام قبلی
+        bot.delete_message(chat_id, message_id)
+    except:
+        pass
+    
+    # پیام جدید که به کاربر می‌گه فضولی کردی و کاربر فهمید
+    final_message = (
+        f"😅 **فضولی کردی و {owner_name} فهمید!**\n\n"
+        f"دیگه این کارو نکن 😊"
+    )
+    
+    try:
+        bot.send_message(chat_id, final_message, parse_mode='Markdown')
+    except:
+        pass
+
 def send_report_after_delay(link_code, owner_id, clicker_id, delay=75):
+    """ارسال گزارش به صاحب لینک بعد از تاخیر"""
     time.sleep(delay)
     
     c.execute("SELECT cancelled FROM pending_reports WHERE link_code = ? AND clicker_id = ? AND owner_id = ? ORDER BY id DESC LIMIT 1", 
@@ -89,11 +112,6 @@ def start(message):
         clicker_id = user_id
         
         if owner_id and owner_id != clicker_id:
-            # ذخیره در pending_reports
-            c.execute("INSERT INTO pending_reports (link_code, owner_id, clicker_id, expires_at) VALUES (?, ?, ?, ?)",
-                      (code, owner_id, clicker_id, datetime.now() + timedelta(seconds=75)))
-            conn.commit()
-            
             owner_name = get_owner_name(owner_id)
             
             # ========== دکمه لغو گزارش ==========
@@ -102,24 +120,33 @@ def start(message):
             
             # ========== پیام تله به کلیک‌کننده ==========
             trap_message = (
-                f"⚠️ **نبايد اين فضولی رو ميکردی!**\n\n"
+                f"⚠️ **نبايد اين فضولی رو ميکردی!** 🥰\n\n"
                 f"الان اين فضوليت برای {owner_name} ارسال شد، "
-                f"بهتره قبل از اينکه بياد ببينه، خودت بهش بگی داشتی فضولی ميکردی 😂\n\n"
-                f"برای عدم ارسال دکمه زیر را فشار دهید (فرصت شما 1 دقیقه و 15 ثانیه)\n\n"
+                f"بهتره قبل از اينکه بياد ببينه، خودت بهش بگی داشتی فضولی ميکردی 😊\n\n"
+                f"برای عدم ارسال دکمه زير را فشار دهيد (فرصت شما 1 دقيقه و 15 ثانيه)\n\n"
                 f"❌ عدم ارسال گزارش فضولی"
             )
             
-            try:
-                bot.send_message(clicker_id, trap_message, reply_markup=keyboard, parse_mode='Markdown')
-            except:
-                pass
+            msg = bot.send_message(clicker_id, trap_message, reply_markup=keyboard, parse_mode='Markdown')
             
-            # استارت تایمر 75 ثانیه
-            timer_thread = threading.Thread(
+            # ذخیره در pending_reports
+            c.execute("INSERT INTO pending_reports (link_code, owner_id, clicker_id, message_id, expires_at) VALUES (?, ?, ?, ?, ?)",
+                      (code, owner_id, clicker_id, msg.message_id, datetime.now() + timedelta(seconds=75)))
+            conn.commit()
+            
+            # ========== تایمر برای حذف پیام تله ==========
+            delete_thread = threading.Thread(
+                target=delete_message_later,
+                args=(clicker_id, msg.message_id, 75, clicker_id, owner_name)
+            )
+            delete_thread.start()
+            
+            # ========== تایمر برای ارسال گزارش به صاحب لینک ==========
+            report_thread = threading.Thread(
                 target=send_report_after_delay,
                 args=(code, owner_id, clicker_id, 75)
             )
-            timer_thread.start()
+            report_thread.start()
             
         elif owner_id == clicker_id:
             bot.send_message(clicker_id, "⚠️ این لینک مال خودته!")
@@ -148,10 +175,16 @@ def cancel_report(call):
     c.execute("UPDATE pending_reports SET cancelled = TRUE WHERE link_code = ? AND clicker_id = ?", (code, clicker_id))
     conn.commit()
     
-    bot.edit_message_text(
-        "✅ **گزارش فضولی ارسال نشد!**\n\nاين فرصت رو غنيمت بدون و ديگه فضولی نکن.",
+    # حذف پیام تله
+    try:
+        bot.delete_message(call.message.chat.id, call.message.message_id)
+    except:
+        pass
+    
+    # پیام تأیید
+    bot.send_message(
         call.message.chat.id,
-        call.message.message_id,
+        "✅ **گزارش فضولی ارسال نشد!**\n\nاين فرصت رو غنيمت بدون و ديگه فضولی نکن.",
         parse_mode='Markdown'
     )
     bot.answer_callback_query(call.id, "گزارش کنسل شد!")
