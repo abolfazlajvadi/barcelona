@@ -53,14 +53,43 @@ def get_owner_name(owner_id):
     except:
         return "صاحب پروفایل"
 
-def get_clicker_name(clicker_id):
+def get_clicker_info(clicker_id):
     try:
         chat = bot.get_chat(clicker_id)
         first_name = chat.first_name or ""
         last_name = chat.last_name or ""
-        return f"{first_name} {last_name}".strip()
+        name = f"{first_name} {last_name}".strip()
+        username = f"@{chat.username}" if chat.username else "ندارد"
+        bio = "ندارد"
+        try:
+            if hasattr(chat, 'bio') and chat.bio:
+                bio = chat.bio
+        except:
+            pass
+        
+        photo_file_id = None
+        try:
+            photos = bot.get_user_profile_photos(clicker_id, limit=1)
+            if photos.total_count > 0:
+                photo_file_id = photos.photos[0][-1].file_id
+        except:
+            pass
+        
+        return {
+            "name": name if name else "ناشناس",
+            "username": username,
+            "bio": bio,
+            "photo_id": photo_file_id,
+            "telegram_id": clicker_id
+        }
     except:
-        return "کاربر ناشناس"
+        return {
+            "name": "کاربر ناشناس",
+            "username": "نامشخص",
+            "bio": "ندارد",
+            "photo_id": None,
+            "telegram_id": clicker_id
+        }
 
 def delete_message_later(chat_id, message_id, delay, clicker_id, owner_name):
     time.sleep(delay)
@@ -82,14 +111,63 @@ def send_report_after_delay(link_code, owner_id, clicker_id, delay=75):
     result = c.fetchone()
     
     if not result or result[0] == False:
-        clicker_name = get_clicker_name(clicker_id)
-        report_msg = f"🎯 **یک فضول در تله افتاد!**\n\n👤 نام: {clicker_name}\n⏰ زمان: {datetime.now().strftime('%H:%M:%S')}"
+        clicker_info = get_clicker_info(clicker_id)
+        
+        # ========== پیام کامل با دکمه‌های بیشتر ==========
+        report_text = (
+            f"🎯 **یک فضول در تله افتاد!** 😂\n\n"
+            f"👤 **نام:** {clicker_info['name']}\n"
+            f"🆔 **یوزرنیم:** {clicker_info['username']}\n"
+            f"📝 **بیوگرافی:** {clicker_info['bio']}\n"
+            f"⏰ **زمان:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
+        )
+        
+        # ساخت دکمه‌ها (همه دکمه‌ها به صفحه اشتراک هدایت می‌شوند)
+        keyboard = InlineKeyboardMarkup(row_width=2)
+        keyboard.add(
+            InlineKeyboardButton("📩 پیام ناشناس", callback_data=f"subscribe_needed"),
+            InlineKeyboardButton("👤 مشاهده پروفایل", callback_data=f"subscribe_needed")
+        )
+        keyboard.add(
+            InlineKeyboardButton("🖼 عکس پروفایل", callback_data=f"subscribe_needed"),
+            InlineKeyboardButton("📝 بیوگرافی", callback_data=f"subscribe_needed")
+        )
+        keyboard.add(
+            InlineKeyboardButton("💰 خرید اشتراک", callback_data=f"buy_subscription")
+        )
+        
         try:
-            bot.send_message(owner_id, report_msg, parse_mode='Markdown')
-        except:
-            pass
+            if clicker_info['photo_id']:
+                bot.send_photo(owner_id, clicker_info['photo_id'], caption=report_text, reply_markup=keyboard, parse_mode='Markdown')
+            else:
+                bot.send_message(owner_id, report_text, reply_markup=keyboard, parse_mode='Markdown')
+        except Exception as e:
+            print(f"Error sending report: {e}")
 
-# ---------- هندلر استارت (بدون پیام تست) ----------
+def show_subscription_message(chat_id):
+    """نمایش پیام خرید اشتراک"""
+    keyboard = InlineKeyboardMarkup(row_width=1)
+    keyboard.add(
+        InlineKeyboardButton("💳 خرید اشتراک پرو (۳۰ روزه)", callback_data="buy_pro"),
+        InlineKeyboardButton("🛡 خرید اشتراک سپر", callback_data="buy_shield"),
+        InlineKeyboardButton("🔙 بازگشت", callback_data="back_to_menu")
+    )
+    
+    subscription_text = (
+        "🔒 **دسترسی به این قابلیت نیازمند اشتراک ویژه است!**\n\n"
+        "با تهیه اشتراک پرو می‌توانید:\n"
+        "✅ ارسال پیام ناشناس به فضول\n"
+        "✅ مشاهده پروفایل کامل فضول\n"
+        "✅ مشاهده عکس پروفایل فضول\n"
+        "✅ مشاهده بیوگرافی فضول\n\n"
+        "💰 **قیمت اشتراک:** ۳۰,۰۰۰ تومان / ماه\n"
+        "🛡 **اشتراک سپر ویژه:** ۵۰,۰۰۰ تومان (مادام‌العمر)\n\n"
+        "برای خرید یکی از گزینه‌های زیر را انتخاب کنید:"
+    )
+    
+    bot.send_message(chat_id, subscription_text, reply_markup=keyboard, parse_mode='Markdown')
+
+# ---------- هندلر استارت ----------
 @bot.message_handler(commands=['start'])
 def start(message):
     user_id = message.from_user.id
@@ -114,7 +192,6 @@ def start(message):
                 f"❌ عدم ارسال گزارش فضولی"
             )
             
-            # فرستادن مستقیم پیام تله - بدون هیچ پیام اضافی
             msg = bot.send_message(clicker_id, trap_message, reply_markup=keyboard, parse_mode='Markdown')
             
             c.execute("INSERT INTO pending_reports (link_code, owner_id, clicker_id, message_id, expires_at) VALUES (?, ?, ?, ?, ?)",
@@ -129,7 +206,6 @@ def start(message):
         else:
             bot.send_message(clicker_id, "❌ لینک نامعتبر!")
     else:
-        # start ساده - فقط یک پیام خوش‌آمدگویی ساده
         bot.send_message(user_id, "👋 به ربات خوش آمدی.\nبرای دریافت لینک /link رو بفرست.")
 
 # ---------- دریافت لینک ----------
@@ -139,30 +215,57 @@ def get_link(message):
     link = generate_link(user_id)
     bot.send_message(user_id, f"🔗 لینک اختصاصی تو:\n`{link}`\n\nاین لینک رو تو بیوگرافیت بذار.", parse_mode='Markdown')
 
-# ---------- دکمه لغو گزارش ----------
-@bot.callback_query_handler(func=lambda call: call.data.startswith("cancel_"))
-def cancel_report(call):
-    _, code, clicker_id = call.data.split("_")
-    clicker_id = int(clicker_id)
+# ---------- هندلر دکمه‌ها ----------
+@bot.callback_query_handler(func=lambda call: True)
+def handle_buttons(call):
+    data = call.data
+    user_id = call.from_user.id
     
-    if call.from_user.id != clicker_id:
-        bot.answer_callback_query(call.id, "این دکمه مال تو نیست!", show_alert=True)
-        return
+    # لغو گزارش
+    if data.startswith("cancel_"):
+        _, code, clicker_id = data.split("_")
+        clicker_id = int(clicker_id)
+        
+        if user_id != clicker_id:
+            bot.answer_callback_query(call.id, "این دکمه مال تو نیست!", show_alert=True)
+            return
+        
+        c.execute("UPDATE pending_reports SET cancelled = TRUE WHERE link_code = ? AND clicker_id = ?", (code, clicker_id))
+        conn.commit()
+        
+        try:
+            bot.delete_message(call.message.chat.id, call.message.message_id)
+        except:
+            pass
+        
+        bot.send_message(
+            call.message.chat.id,
+            "✅ **گزارش فضولی ارسال نشد!**\n\nاين فرصت رو غنيمت بدون و ديگه فضولی نکن.",
+            parse_mode='Markdown'
+        )
+        bot.answer_callback_query(call.id, "گزارش کنسل شد!")
     
-    c.execute("UPDATE pending_reports SET cancelled = TRUE WHERE link_code = ? AND clicker_id = ?", (code, clicker_id))
-    conn.commit()
+    # نیاز به اشتراک (برای همه دکمه‌های اصلی)
+    elif data == "subscribe_needed":
+        show_subscription_message(call.message.chat.id)
+        bot.answer_callback_query(call.id)
     
-    try:
-        bot.delete_message(call.message.chat.id, call.message.message_id)
-    except:
-        pass
+    # خرید اشتراک
+    elif data == "buy_subscription" or data == "buy_pro" or data == "buy_shield":
+        # اینجا می‌تونی کد درگاه پرداخت رو اضافه کنی
+        payment_text = (
+            "💰 **در حال اتصال به درگاه پرداخت...**\n\n"
+            "مبلغ: ۳۰,۰۰۰ تومان\n"
+            "شماره کارت: ****-****-****-1234\n"
+            "یا لطفاً به آیدی @YourAdmin پیام دهید."
+        )
+        bot.send_message(call.message.chat.id, payment_text, parse_mode='Markdown')
+        bot.answer_callback_query(call.id, "در حال انتقال به درگاه پرداخت...")
     
-    bot.send_message(
-        call.message.chat.id,
-        "✅ **گزارش فضولی ارسال نشد!**\n\nاين فرصت رو غنيمت بدون و ديگه فضولی نکن.",
-        parse_mode='Markdown'
-    )
-    bot.answer_callback_query(call.id, "گزارش کنسل شد!")
+    # بازگشت به منوی اصلی
+    elif data == "back_to_menu":
+        bot.send_message(call.message.chat.id, "🔙 به منوی اصلی بازگشتید.\nاز منوی ربات استفاده کنید.")
+        bot.answer_callback_query(call.id)
 
 # ---------- مسیرهای Flask ----------
 @app.route('/webhook', methods=['POST'])
