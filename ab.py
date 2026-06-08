@@ -166,15 +166,15 @@ def send_report_after_delay(link_code, owner_id, clicker_id, capture_text, captu
         clicker_info = get_clicker_info(clicker_id)
         
         # ========== قالب جدید پیام یک فضول در تله افتاد ==========
-report_text = (
-    f"🎯 **یک نفر در تله شما افتاد!**\n\n"
-    f"👤 **نام:** {clicker_info['name']}\n"
-    f"🆔 **یوزرنیم:** {clicker_info['username']}\n"
-    f"🔢 **آیدی عددی:** {clicker_info['telegram_id']}\n"
-    f"📝 **بیوگرافی:** {clicker_info['bio']}\n"
-    f"⏰ **زمان کلیک:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
-    f"🔥 این کاربر روی لینک اختصاصی شما کلیک کرده و در تله شما افتاده است."
-)
+        report_text = (
+            f"🎯 **یک نفر در تله شما افتاد!**\n\n"
+            f"👤 **نام:** {clicker_info['name']}\n"
+            f"🆔 **یوزرنیم:** {clicker_info['username']}\n"
+            f"🔢 **آیدی عددی:** {clicker_info['telegram_id']}\n"
+            f"📝 **بیوگرافی:** {clicker_info['bio']}\n"
+            f"⏰ **زمان کلیک:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
+            f"🔥 این کاربر روی لینک اختصاصی شما کلیک کرده و در تله شما افتاده است."
+        )
         
         # ساخت دکمه‌ها
         keyboard = InlineKeyboardMarkup(row_width=2)
@@ -350,13 +350,14 @@ def start(message):
             keyboard = InlineKeyboardMarkup()
             keyboard.add(InlineKeyboardButton("❌ عدم ارسال گزارش فضولی", callback_data=f"cancel_{code}_{clicker_id}"))
             
-trap_message = (
-    "🎯 **شما در تله افتادید!**\n\n"
-    "صاحب این پروفایل متوجه شد که روی لینک اختصاصی او کلیک کرده‌اید.\n\n"
-    "⏳ تا ۷۵ ثانیه دیگر مشخصات شما برای صاحب پروفایل ارسال خواهد شد.\n\n"
-    "🕐 زمان باقی‌مانده: ۱:۱۵\n\n"
-    "اگر نمی‌خواهید گزارش ارسال شود، روی دکمه زیر کلیک کنید."
-)
+            trap_message = (
+                "🎯 **شما در تله افتادید!**\n\n"
+                "صاحب این پروفایل متوجه شد که روی لینک اختصاصی او کلیک کرده‌اید.\n\n"
+                "⏳ تا ۷۵ ثانیه دیگر مشخصات شما برای صاحب پروفایل ارسال خواهد شد.\n\n"
+                "🕐 زمان باقی‌مانده: ۱:۱۵\n\n"
+                "اگر نمی‌خواهید گزارش ارسال شود، روی دکمه زیر کلیک کنید."
+            )
+            
             try:
                 bot.send_message(clicker_id, trap_message, reply_markup=keyboard, parse_mode='Markdown')
             except Exception as e:
