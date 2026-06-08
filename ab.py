@@ -53,14 +53,24 @@ def get_owner_name(owner_id):
     except:
         return "صاحب پروفایل"
 
-def get_clicker_name(clicker_id):
+def get_clicker_info(clicker_id):
     try:
         chat = bot.get_chat(clicker_id)
+
         first_name = chat.first_name or ""
         last_name = chat.last_name or ""
-        return f"{first_name} {last_name}".strip()
+
+        return {
+            "name": f"{first_name} {last_name}".strip(),
+            "username": f"@{chat.username}" if chat.username else "ندارد",
+            "user_id": clicker_id
+        }
     except:
-        return "کاربر ناشناس"
+        return {
+            "name": "کاربر ناشناس",
+            "username": "ندارد",
+            "user_id": clicker_id
+        }
 
 def delete_message_later(chat_id, message_id, delay, clicker_id, owner_name):
     time.sleep(delay)
@@ -77,17 +87,58 @@ def delete_message_later(chat_id, message_id, delay, clicker_id, owner_name):
 
 def send_report_after_delay(link_code, owner_id, clicker_id, delay=75):
     time.sleep(delay)
-    c.execute("SELECT cancelled FROM pending_reports WHERE link_code = ? AND clicker_id = ? AND owner_id = ? ORDER BY id DESC LIMIT 1", 
-              (link_code, clicker_id, owner_id))
+
+    c.execute(
+        "SELECT cancelled FROM pending_reports WHERE link_code = ? AND clicker_id = ? AND owner_id = ? ORDER BY id DESC LIMIT 1",
+        (link_code, clicker_id, owner_id)
+    )
+
     result = c.fetchone()
-    
+
     if not result or result[0] == False:
-        clicker_name = get_clicker_name(clicker_id)
-        report_msg = f"🎯 **یک فضول در تله افتاد!**\n\n👤 نام: {clicker_name}\n⏰ زمان: {datetime.now().strftime('%H:%M:%S')}"
+
+        user = get_clicker_info(clicker_id)
+
+        report_msg = (
+            f"🚨 *یک فضول در تله افتاد!*\n\n"
+            f"👤 نام: {user['name']}\n"
+            f"🆔 یوزرنیم: {user['username']}\n"
+            f"⏰ زمان: {datetime.now().strftime('%H:%M:%S')}"
+        )
+
+        keyboard = InlineKeyboardMarkup(row_width=2)
+
+        keyboard.add(
+            InlineKeyboardButton(
+                "👤 پیوی",
+                url=f"tg://user?id={clicker_id}"
+            ),
+            InlineKeyboardButton(
+                "✉️ پیام ناشناس",
+                callback_data=f"msg_{clicker_id}"
+            )
+        )
+
+        keyboard.add(
+            InlineKeyboardButton(
+                "🖼 عکس پروفایل",
+                callback_data=f"photo_{clicker_id}"
+            ),
+            InlineKeyboardButton(
+                "📝 اطلاعات",
+                callback_data=f"info_{clicker_id}"
+            )
+        )
+
         try:
-            bot.send_message(owner_id, report_msg, parse_mode='Markdown')
-        except:
-            pass
+            bot.send_message(
+                owner_id,
+                report_msg,
+                parse_mode="Markdown",
+                reply_markup=keyboard
+            )
+        except Exception as e:
+            print(e)
 
 # ---------- هندلر استارت (بدون پیام تست) ----------
 @bot.message_handler(commands=['start'])
@@ -163,6 +214,58 @@ def cancel_report(call):
         parse_mode='Markdown'
     )
     bot.answer_callback_query(call.id, "گزارش کنسل شد!")
+    @bot.callback_query_handler(func=lambda c: c.data.startswith("photo_"))
+def show_photo(call):
+
+    target_id = int(call.data.split("_")[1])
+
+    try:
+        photos = bot.get_user_profile_photos(target_id, limit=1)
+
+        if photos.total_count > 0:
+            photo = photos.photos[0][-1].file_id
+
+            bot.send_photo(
+                call.message.chat.id,
+                photo,
+                caption="🖼 عکس پروفایل کاربر"
+            )
+        else:
+            bot.answer_callback_query(
+                call.id,
+                "عکس پروفایل پیدا نشد",
+                show_alert=True
+            )
+
+    except:
+        bot.answer_callback_query(
+            call.id,
+            "خطا در دریافت عکس",
+            show_alert=True
+        )
+        @bot.callback_query_handler(func=lambda c: c.data.startswith("info_"))
+def show_info(call):
+
+    target_id = int(call.data.split("_")[1])
+
+    try:
+        chat = bot.get_chat(target_id)
+
+        text = (
+            f"👤 نام: {chat.first_name or ''} {chat.last_name or ''}\n"
+            f"🆔 یوزرنیم: @{chat.username if chat.username else 'ندارد'}"
+        )
+
+        bot.send_message(
+            call.message.chat.id,
+            text
+        )
+
+    except:
+        bot.send_message(
+            call.message.chat.id,
+            "اطلاعاتی پیدا نشد"
+        )
 
 # ---------- مسیرهای Flask ----------
 @app.route('/webhook', methods=['POST'])
