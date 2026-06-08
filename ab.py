@@ -1,12 +1,12 @@
 import sqlite3
-import random
-import string
-from datetime import datetime
+import threading
+import time
+from datetime import datetime, timedelta
 from flask import Flask, request, jsonify
 import telebot
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 
-# ---------- تنظیمات ساده ----------
+# ---------- تنظیمات ----------
 TOKEN = "8981742192:AAHC8z6u6GifXgMIafvzv0tn_Q2LV1mM2bQ"
 BOT_USERNAME = "nevergivup_bot"
 BASE_URL = "https://barcelona-l5tu.onrender.com"
@@ -17,58 +17,116 @@ app = Flask(__name__)
 conn = sqlite3.connect("/tmp/tracker.db", check_same_thread=False)
 c = conn.cursor()
 
-# حذف جدول‌های قبلی و ساخت دوباره (برای اطمینان)
 c.execute("DROP TABLE IF EXISTS users")
 c.execute("CREATE TABLE users (telegram_id INTEGER PRIMARY KEY, link_code TEXT UNIQUE)")
+
+c.execute("""CREATE TABLE IF NOT EXISTS pending_reports (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    link_code TEXT,
+    owner_id INTEGER,
+    clicker_id INTEGER,
+    expires_at DATETIME,
+    cancelled BOOLEAN DEFAULT FALSE
+)""")
 conn.commit()
 
-# ---------- تابع لینک با آیدی عددی ----------
+# ---------- توابع ----------
 def generate_link(telegram_id):
-    code = str(telegram_id)  # آیدی عددی خودشه
+    code = str(telegram_id)
     c.execute("INSERT OR REPLACE INTO users (telegram_id, link_code) VALUES (?, ?)", (telegram_id, code))
     conn.commit()
     return f"https://t.me/{BOT_USERNAME}?start=track_{code}"
 
 def get_owner_id_by_code(code):
     try:
-        # کد همون آیدی عددیه، پس خودش رو برگردون
         return int(code)
     except:
         return None
 
-# ---------- هندلر استارت (بخش اصلی) ----------
+def get_owner_name(owner_id):
+    try:
+        chat = bot.get_chat(owner_id)
+        first_name = chat.first_name or ""
+        last_name = chat.last_name or ""
+        return f"{first_name} {last_name}".strip()
+    except:
+        return "صاحب پروفایل"
+
+def get_clicker_name(clicker_id):
+    try:
+        chat = bot.get_chat(clicker_id)
+        first_name = chat.first_name or ""
+        last_name = chat.last_name or ""
+        return f"{first_name} {last_name}".strip()
+    except:
+        return "کاربر ناشناس"
+
+def send_report_after_delay(link_code, owner_id, clicker_id, delay=75):
+    time.sleep(delay)
+    
+    c.execute("SELECT cancelled FROM pending_reports WHERE link_code = ? AND clicker_id = ? AND owner_id = ? ORDER BY id DESC LIMIT 1", 
+              (link_code, clicker_id, owner_id))
+    result = c.fetchone()
+    
+    if not result or result[0] == False:
+        clicker_name = get_clicker_name(clicker_id)
+        report_msg = f"🎯 **یک فضول در تله افتاد!**\n\n👤 نام: {clicker_name}\n⏰ زمان: {datetime.now().strftime('%H:%M:%S')}"
+        
+        try:
+            bot.send_message(owner_id, report_msg, parse_mode='Markdown')
+        except:
+            pass
+
+# ---------- هندلر استارت ----------
 @bot.message_handler(commands=['start'])
 def start(message):
     user_id = message.from_user.id
     text = message.text
     
-    # پیام تست به کاربر (مهم!)
-    bot.send_message(user_id, f"✅ ربات کار می‌کند. متن دریافتی: {text}")
-    
-    # بررسی اگر لینک اختصاصی بود
     if text.startswith("/start track_"):
         code = text.split("track_")[1]
         owner_id = get_owner_id_by_code(code)
+        clicker_id = user_id
         
-        # پیام دوم برای دیباگ
-        bot.send_message(user_id, f"🔍 کد استخراج شده: {code}, صاحب لینک: {owner_id}")
-        
-        if owner_id and owner_id != user_id:
+        if owner_id and owner_id != clicker_id:
+            # ذخیره در pending_reports
+            c.execute("INSERT INTO pending_reports (link_code, owner_id, clicker_id, expires_at) VALUES (?, ?, ?, ?)",
+                      (code, owner_id, clicker_id, datetime.now() + timedelta(seconds=75)))
+            conn.commit()
+            
+            owner_name = get_owner_name(owner_id)
+            
+            # ========== دکمه لغو گزارش ==========
+            keyboard = InlineKeyboardMarkup()
+            keyboard.add(InlineKeyboardButton("❌ عدم ارسال گزارش فضولی", callback_data=f"cancel_{code}_{clicker_id}"))
+            
             # ========== پیام تله به کلیک‌کننده ==========
-            trap_msg = "⚠️ **تو در تله افتادی!**\n\nصاحب پروفایل از بازدید تو مطلع شد."
-            bot.send_message(user_id, trap_msg, parse_mode='Markdown')
+            trap_message = (
+                f"⚠️ **نبايد اين فضولی رو ميکردی!**\n\n"
+                f"الان اين فضوليت برای {owner_name} ارسال شد، "
+                f"بهتره قبل از اينکه بياد ببينه، خودت بهش بگی داشتی فضولی ميکردی 😂\n\n"
+                f"برای عدم ارسال دکمه زیر را فشار دهید (فرصت شما 1 دقیقه و 15 ثانیه)\n\n"
+                f"❌ عدم ارسال گزارش فضولی"
+            )
             
-            # ========== گزارش به صاحب لینک ==========
-            clicker_name = message.from_user.first_name
-            report_msg = f"🎯 **یک فضول در تله افتاد!**\n\n👤 نام: {clicker_name}\n⏰ زمان: {datetime.now().strftime('%H:%M:%S')}"
-            bot.send_message(owner_id, report_msg, parse_mode='Markdown')
+            try:
+                bot.send_message(clicker_id, trap_message, reply_markup=keyboard, parse_mode='Markdown')
+            except:
+                pass
             
-        elif owner_id == user_id:
-            bot.send_message(user_id, "⚠️ این لینک مال خودته!")
+            # استارت تایمر 75 ثانیه
+            timer_thread = threading.Thread(
+                target=send_report_after_delay,
+                args=(code, owner_id, clicker_id, 75)
+            )
+            timer_thread.start()
+            
+        elif owner_id == clicker_id:
+            bot.send_message(clicker_id, "⚠️ این لینک مال خودته!")
         else:
-            bot.send_message(user_id, "❌ لینک نامعتبر!")
+            bot.send_message(clicker_id, "❌ لینک نامعتبر!")
     else:
-        bot.send_message(user_id, "👋 به ربات خوش آمدی. برای دریافت لینک /link رو بفرست.")
+        bot.send_message(user_id, "👋 به ربات خوش آمدی.\nبرای دریافت لینک /link رو بفرست.")
 
 # ---------- دریافت لینک ----------
 @bot.message_handler(commands=['link'])
@@ -77,7 +135,28 @@ def get_link(message):
     link = generate_link(user_id)
     bot.send_message(user_id, f"🔗 لینک اختصاصی تو:\n`{link}`\n\nاین لینک رو تو بیوگرافیت بذار.", parse_mode='Markdown')
 
-# ---------- مسیر وب‌هوک ----------
+# ---------- دکمه لغو گزارش ----------
+@bot.callback_query_handler(func=lambda call: call.data.startswith("cancel_"))
+def cancel_report(call):
+    _, code, clicker_id = call.data.split("_")
+    clicker_id = int(clicker_id)
+    
+    if call.from_user.id != clicker_id:
+        bot.answer_callback_query(call.id, "این دکمه مال تو نیست!", show_alert=True)
+        return
+    
+    c.execute("UPDATE pending_reports SET cancelled = TRUE WHERE link_code = ? AND clicker_id = ?", (code, clicker_id))
+    conn.commit()
+    
+    bot.edit_message_text(
+        "✅ **گزارش فضولی ارسال نشد!**\n\nاين فرصت رو غنيمت بدون و ديگه فضولی نکن.",
+        call.message.chat.id,
+        call.message.message_id,
+        parse_mode='Markdown'
+    )
+    bot.answer_callback_query(call.id, "گزارش کنسل شد!")
+
+# ---------- مسیرهای Flask ----------
 @app.route('/webhook', methods=['POST'])
 def webhook():
     try:
