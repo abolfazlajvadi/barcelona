@@ -113,7 +113,7 @@ def send_report_after_delay(link_code, owner_id, clicker_id, delay=75):
     if not result or result[0] == False:
         clicker_info = get_clicker_info(clicker_id)
         
-        # ========== پیام کامل با دکمه‌های بیشتر ==========
+        # ===== گزارش به کاربر دوم (صاحب لینک) با دکمه‌های جدید =====
         report_text = (
             f"🎯 **یک فضول در تله افتاد!** 😂\n\n"
             f"👤 **نام:** {clicker_info['name']}\n"
@@ -122,18 +122,15 @@ def send_report_after_delay(link_code, owner_id, clicker_id, delay=75):
             f"⏰ **زمان:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
         )
         
-        # ساخت دکمه‌ها (همه دکمه‌ها به صفحه اشتراک هدایت می‌شوند)
+        # ساخت دکمه‌ها برای کاربر دوم
         keyboard = InlineKeyboardMarkup(row_width=2)
         keyboard.add(
-            InlineKeyboardButton("📩 پیام ناشناس", callback_data=f"subscribe_needed"),
-            InlineKeyboardButton("👤 مشاهده پروفایل", callback_data=f"subscribe_needed")
+            InlineKeyboardButton("📩 پیام ناشناس", callback_data=f"msg_{clicker_id}"),
+            InlineKeyboardButton("👤 مشاهده پروفایل", callback_data=f"profile_{clicker_id}")
         )
         keyboard.add(
-            InlineKeyboardButton("🖼 عکس پروفایل", callback_data=f"subscribe_needed"),
-            InlineKeyboardButton("📝 بیوگرافی", callback_data=f"subscribe_needed")
-        )
-        keyboard.add(
-            InlineKeyboardButton("💰 خرید اشتراک", callback_data=f"buy_subscription")
+            InlineKeyboardButton("🖼 عکس پروفایل", callback_data=f"photo_{clicker_id}"),
+            InlineKeyboardButton("📝 بیوگرافی", callback_data=f"bio_{clicker_id}")
         )
         
         try:
@@ -143,29 +140,6 @@ def send_report_after_delay(link_code, owner_id, clicker_id, delay=75):
                 bot.send_message(owner_id, report_text, reply_markup=keyboard, parse_mode='Markdown')
         except Exception as e:
             print(f"Error sending report: {e}")
-
-def show_subscription_message(chat_id):
-    """نمایش پیام خرید اشتراک"""
-    keyboard = InlineKeyboardMarkup(row_width=1)
-    keyboard.add(
-        InlineKeyboardButton("💳 خرید اشتراک پرو (۳۰ روزه)", callback_data="buy_pro"),
-        InlineKeyboardButton("🛡 خرید اشتراک سپر", callback_data="buy_shield"),
-        InlineKeyboardButton("🔙 بازگشت", callback_data="back_to_menu")
-    )
-    
-    subscription_text = (
-        "🔒 **دسترسی به این قابلیت نیازمند اشتراک ویژه است!**\n\n"
-        "با تهیه اشتراک پرو می‌توانید:\n"
-        "✅ ارسال پیام ناشناس به فضول\n"
-        "✅ مشاهده پروفایل کامل فضول\n"
-        "✅ مشاهده عکس پروفایل فضول\n"
-        "✅ مشاهده بیوگرافی فضول\n\n"
-        "💰 **قیمت اشتراک:** ۳۰,۰۰۰ تومان / ماه\n"
-        "🛡 **اشتراک سپر ویژه:** ۵۰,۰۰۰ تومان (مادام‌العمر)\n\n"
-        "برای خرید یکی از گزینه‌های زیر را انتخاب کنید:"
-    )
-    
-    bot.send_message(chat_id, subscription_text, reply_markup=keyboard, parse_mode='Markdown')
 
 # ---------- هندلر استارت ----------
 @bot.message_handler(commands=['start'])
@@ -215,13 +189,13 @@ def get_link(message):
     link = generate_link(user_id)
     bot.send_message(user_id, f"🔗 لینک اختصاصی تو:\n`{link}`\n\nاین لینک رو تو بیوگرافیت بذار.", parse_mode='Markdown')
 
-# ---------- هندلر دکمه‌ها ----------
+# ---------- هندلر دکمه‌های جدید برای کاربر دوم ----------
 @bot.callback_query_handler(func=lambda call: True)
 def handle_buttons(call):
     data = call.data
     user_id = call.from_user.id
     
-    # لغو گزارش
+    # لغو گزارش (دکمه فضول)
     if data.startswith("cancel_"):
         _, code, clicker_id = data.split("_")
         clicker_id = int(clicker_id)
@@ -245,27 +219,57 @@ def handle_buttons(call):
         )
         bot.answer_callback_query(call.id, "گزارش کنسل شد!")
     
-    # نیاز به اشتراک (برای همه دکمه‌های اصلی)
-    elif data == "subscribe_needed":
-        show_subscription_message(call.message.chat.id)
+    # پیام ناشناس
+    elif data.startswith("msg_"):
+        target_id = int(data.split("_")[1])
+        bot.send_message(call.message.chat.id, "✍️ **پیام ناشناس خود را بنویسید:**", parse_mode='Markdown')
+        bot.register_next_step_handler_by_chat_id(call.message.chat.id, lambda m: send_anonymous_message(m, target_id))
         bot.answer_callback_query(call.id)
     
-    # خرید اشتراک
-    elif data == "buy_subscription" or data == "buy_pro" or data == "buy_shield":
-        # اینجا می‌تونی کد درگاه پرداخت رو اضافه کنی
-        payment_text = (
-            "💰 **در حال اتصال به درگاه پرداخت...**\n\n"
-            "مبلغ: ۳۰,۰۰۰ تومان\n"
-            "شماره کارت: ****-****-****-1234\n"
-            "یا لطفاً به آیدی @YourAdmin پیام دهید."
+    # مشاهده پروفایل کامل
+    elif data.startswith("profile_"):
+        target_id = int(data.split("_")[1])
+        info = get_clicker_info(target_id)
+        profile_text = (
+            f"👤 **پروفایل کاربر**\n\n"
+            f"**نام:** {info['name']}\n"
+            f"**یوزرنیم:** {info['username']}\n"
+            f"**بیوگرافی:** {info['bio']}\n"
+            f"**آیدی عددی:** {info['telegram_id']}"
         )
-        bot.send_message(call.message.chat.id, payment_text, parse_mode='Markdown')
-        bot.answer_callback_query(call.id, "در حال انتقال به درگاه پرداخت...")
-    
-    # بازگشت به منوی اصلی
-    elif data == "back_to_menu":
-        bot.send_message(call.message.chat.id, "🔙 به منوی اصلی بازگشتید.\nاز منوی ربات استفاده کنید.")
+        if info['photo_id']:
+            bot.send_photo(call.message.chat.id, info['photo_id'], caption=profile_text, parse_mode='Markdown')
+        else:
+            bot.send_message(call.message.chat.id, profile_text, parse_mode='Markdown')
         bot.answer_callback_query(call.id)
+    
+    # فقط عکس پروفایل
+    elif data.startswith("photo_"):
+        target_id = int(data.split("_")[1])
+        info = get_clicker_info(target_id)
+        if info['photo_id']:
+            bot.send_photo(call.message.chat.id, info['photo_id'], caption="🖼 **عکس پروفایل کاربر**", parse_mode='Markdown')
+        else:
+            bot.send_message(call.message.chat.id, "❌ این کاربر عکس پروفایل ندارد.")
+        bot.answer_callback_query(call.id)
+    
+    # فقط بیوگرافی
+    elif data.startswith("bio_"):
+        target_id = int(data.split("_")[1])
+        info = get_clicker_info(target_id)
+        bot.send_message(call.message.chat.id, f"📝 **بیوگرافی کاربر:**\n\n{info['bio']}", parse_mode='Markdown')
+        bot.answer_callback_query(call.id)
+
+def send_anonymous_message(message, target_id):
+    sender_id = message.from_user.id
+    if message.text:
+        try:
+            bot.send_message(target_id, f"📩 **پیام ناشناس:**\n\n{message.text}", parse_mode='Markdown')
+            bot.send_message(sender_id, "✅ پیام شما **ناشناس** ارسال شد.", parse_mode='Markdown')
+        except Exception as e:
+            bot.send_message(sender_id, f"❌ خطا: {e}")
+    else:
+        bot.send_message(sender_id, "❌ لطفاً فقط متن ارسال کنید.")
 
 # ---------- مسیرهای Flask ----------
 @app.route('/webhook', methods=['POST'])
