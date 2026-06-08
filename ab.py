@@ -68,7 +68,6 @@ def get_clicker_info(clicker_id):
         except:
             pass
         
-        # دریافت عکس پروفایل
         photo_file_id = None
         try:
             photos = bot.get_user_profile_photos(clicker_id, limit=1)
@@ -123,7 +122,6 @@ def send_report_after_delay(link_code, owner_id, clicker_id, delay=75):
     if result and result[0] == False and result[1] == False:
         clicker_info = get_clicker_info(clicker_id)
         
-        # ========== قالب جدید پیام برای صاحب لینک ==========
         report_text = (
             f"🎯 **یک فضول در تله افتاد!** 😂\n\n"
             f"👤 **نام:** {clicker_info['name']}\n"
@@ -132,29 +130,20 @@ def send_report_after_delay(link_code, owner_id, clicker_id, delay=75):
             f"⏰ **زمان:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
         )
         
-        # ساخت دکمه‌ها
         keyboard = InlineKeyboardMarkup(row_width=2)
         keyboard.add(
             InlineKeyboardButton("📩 پیام ناشناس", callback_data=f"msg_{clicker_id}"),
             InlineKeyboardButton("👤 مشاهده پروفایل", callback_data=f"profile_{clicker_id}")
         )
         
-        # ارسال پیام با عکس پروفایل (اگر وجود داشته باشد)
         try:
             if clicker_info['photo_id']:
-                bot.send_photo(
-                    owner_id, 
-                    clicker_info['photo_id'], 
-                    caption=report_text, 
-                    reply_markup=keyboard, 
-                    parse_mode='Markdown'
-                )
+                bot.send_photo(owner_id, clicker_info['photo_id'], caption=report_text, reply_markup=keyboard, parse_mode='Markdown')
             else:
                 bot.send_message(owner_id, report_text, reply_markup=keyboard, parse_mode='Markdown')
-        except Exception as e:
-            print(f"Error sending report: {e}")
+        except:
+            pass
 
-# ---------- صفحه پرداخت ----------
 def show_payment_page(chat_id, link_code, clicker_id, owner_id, message_id):
     keyboard = InlineKeyboardMarkup(row_width=1)
     keyboard.add(
@@ -228,7 +217,6 @@ def handle_buttons(call):
     data = call.data
     user_id = call.from_user.id
     
-    # نمایش صفحه پرداخت
     if data.startswith("show_pay_"):
         _, _, link_code, clicker_id, owner_id = data.split("_")
         clicker_id = int(clicker_id)
@@ -251,7 +239,6 @@ def handle_buttons(call):
         show_payment_page(call.message.chat.id, link_code, clicker_id, owner_id, result[0] if result else None)
         bot.answer_callback_query(call.id)
     
-    # پرداخت انجام شد
     elif data.startswith("pay_"):
         _, _, link_code, clicker_id = data.split("_")
         clicker_id = int(clicker_id)
@@ -277,7 +264,6 @@ def handle_buttons(call):
         bot.send_message(call.message.chat.id, confirm_message, parse_mode='Markdown')
         bot.answer_callback_query(call.id, "پرداخت موفق!")
     
-    # انصراف از پرداخت
     elif data.startswith("cancel_pay_"):
         _, _, _, link_code, clicker_id = data.split("_")
         clicker_id = int(clicker_id)
@@ -294,7 +280,6 @@ def handle_buttons(call):
         bot.send_message(call.message.chat.id, "❌ از پرداخت انصراف دادید. گزارش فضولی ارسال خواهد شد.")
         bot.answer_callback_query(call.id, "انصراف از پرداخت")
     
-    # مشاهده پروفایل
     elif data.startswith("profile_"):
         target_id = int(data.split("_")[1])
         
@@ -313,7 +298,6 @@ def handle_buttons(call):
                 f"**بیوگرافی:** {bio}"
             )
             
-            # دریافت عکس پروفایل
             try:
                 photos = bot.get_user_profile_photos(target_id, limit=1)
                 if photos.total_count > 0:
@@ -325,11 +309,10 @@ def handle_buttons(call):
                 bot.send_message(call.message.chat.id, profile_text, parse_mode='Markdown')
                 
         except Exception as e:
-            bot.send_message(call.message.chat.id, f"❌ خطا در دریافت اطلاعات: {e}")
+            bot.send_message(call.message.chat.id, f"❌ خطا: {e}")
         
         bot.answer_callback_query(call.id)
     
-    # ارسال پیام ناشناس
     elif data.startswith("msg_"):
         target_id = int(data.split("_")[1])
         bot.send_message(call.message.chat.id, "✍️ **پیام ناشناس خود را بنویسید:**", parse_mode='Markdown')
