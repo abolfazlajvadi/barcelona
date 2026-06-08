@@ -13,9 +13,6 @@ BASE_URL = "https://barcelona-l5tu.onrender.com"
 bot = telebot.TeleBot(TOKEN)
 app = Flask(__name__)
 
-# ---------- دیکشنری برای ذخیره موقت لینک کاربران (برای حالت ری‌تای) ----------
-user_pending_link = {}
-
 # ---------- دیتابیس ----------
 conn = sqlite3.connect("/tmp/tracker.db", check_same_thread=False)
 c = conn.cursor()
@@ -92,13 +89,12 @@ def send_report_after_delay(link_code, owner_id, clicker_id, delay=75):
         except:
             pass
 
-# ---------- هندلر استارت ----------
+# ---------- هندلر استارت (بدون پیام تست) ----------
 @bot.message_handler(commands=['start'])
 def start(message):
     user_id = message.from_user.id
     text = message.text
     
-    # حالت اول: کاربر از طریق لینک اختصاصی آمده
     if text.startswith("/start track_"):
         code = text.split("track_")[1]
         owner_id = get_owner_id_by_code(code)
@@ -118,6 +114,7 @@ def start(message):
                 f"❌ عدم ارسال گزارش فضولی"
             )
             
+            # فرستادن مستقیم پیام تله - بدون هیچ پیام اضافی
             msg = bot.send_message(clicker_id, trap_message, reply_markup=keyboard, parse_mode='Markdown')
             
             c.execute("INSERT INTO pending_reports (link_code, owner_id, clicker_id, message_id, expires_at) VALUES (?, ?, ?, ?, ?)",
@@ -131,13 +128,8 @@ def start(message):
             bot.send_message(clicker_id, "⚠️ این لینک مال خودته!")
         else:
             bot.send_message(clicker_id, "❌ لینک نامعتبر!")
-    
-    # حالت دوم: کاربر start ساده زده (تلگرام پارامتر را حذف کرده)
-    elif text == "/start":
-        # پیام خوش‌آمدگویی ساده
-        bot.send_message(user_id, "👋 به ربات خوش آمدی.\nبرای دریافت لینک /link رو بفرست.")
-    
     else:
+        # start ساده - فقط یک پیام خوش‌آمدگویی ساده
         bot.send_message(user_id, "👋 به ربات خوش آمدی.\nبرای دریافت لینک /link رو بفرست.")
 
 # ---------- دریافت لینک ----------
