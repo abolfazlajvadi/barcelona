@@ -1,7 +1,7 @@
 import sqlite3
 import threading
 import time
-from datetime import datetime, timedelta
+from datetime import datetime
 from flask import Flask, request, jsonify
 import telebot
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
@@ -19,17 +19,6 @@ c = conn.cursor()
 
 c.execute("DROP TABLE IF EXISTS users")
 c.execute("CREATE TABLE users (telegram_id INTEGER PRIMARY KEY, link_code TEXT UNIQUE)")
-
-c.execute("""CREATE TABLE IF NOT EXISTS pending_reports (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    link_code TEXT,
-    owner_id INTEGER,
-    clicker_id INTEGER,
-    message_id INTEGER,
-    expires_at DATETIME,
-    cancelled BOOLEAN DEFAULT FALSE,
-    paid BOOLEAN DEFAULT FALSE
-)""")
 conn.commit()
 
 # ---------- توابع ----------
@@ -45,122 +34,27 @@ def get_owner_id_by_code(code):
     except:
         return None
 
-def get_owner_name(owner_id):
+def get_user_info(user_id):
+    """دریافت اطلاعات کاربر برای نمایش"""
     try:
-        chat = bot.get_chat(owner_id)
-        first_name = chat.first_name or ""
-        last_name = chat.last_name or ""
-        return f"{first_name} {last_name}".strip()
-    except:
-        return "صاحب پروفایل"
-
-def get_clicker_info(clicker_id):
-    try:
-        chat = bot.get_chat(clicker_id)
+        chat = bot.get_chat(user_id)
         first_name = chat.first_name or ""
         last_name = chat.last_name or ""
         name = f"{first_name} {last_name}".strip()
         username = f"@{chat.username}" if chat.username else "ندارد"
-        bio = "ندارد"
-        try:
-            if hasattr(chat, 'bio') and chat.bio:
-                bio = chat.bio
-        except:
-            pass
+        bio = chat.bio if hasattr(chat, 'bio') and chat.bio else "ندارد"
         
         photo_file_id = None
         try:
-            photos = bot.get_user_profile_photos(clicker_id, limit=1)
+            photos = bot.get_user_profile_photos(user_id, limit=1)
             if photos.total_count > 0:
                 photo_file_id = photos.photos[0][-1].file_id
         except:
             pass
         
-        return {
-            "name": name if name else "ناشناس",
-            "username": username,
-            "bio": bio,
-            "photo_id": photo_file_id,
-            "telegram_id": clicker_id
-        }
+        return {"name": name, "username": username, "bio": bio, "photo_id": photo_file_id}
     except:
-        return {
-            "name": "کاربر ناشناس",
-            "username": "نامشخص",
-            "bio": "ندارد",
-            "photo_id": None,
-            "telegram_id": clicker_id
-        }
-
-def delete_message_later(chat_id, message_id, delay, clicker_id, owner_name):
-    time.sleep(delay)
-    
-    c.execute("SELECT cancelled, paid FROM pending_reports WHERE clicker_id = ? ORDER BY id DESC LIMIT 1", (clicker_id,))
-    result = c.fetchone()
-    
-    if result and (result[0] == True or result[1] == True):
-        return
-    
-    try:
-        bot.delete_message(chat_id, message_id)
-    except:
-        pass
-    
-    final_message = f"😅 **فضولی کردی و {owner_name} فهمید!**\n\nدیگه این کارو نکن 😊"
-    try:
-        bot.send_message(chat_id, final_message, parse_mode='Markdown')
-    except:
-        pass
-
-def send_report_after_delay(link_code, owner_id, clicker_id, delay=75):
-    time.sleep(delay)
-    
-    c.execute("SELECT cancelled, paid FROM pending_reports WHERE link_code = ? AND clicker_id = ? AND owner_id = ? ORDER BY id DESC LIMIT 1", 
-              (link_code, clicker_id, owner_id))
-    result = c.fetchone()
-    
-    if result and result[0] == False and result[1] == False:
-        clicker_info = get_clicker_info(clicker_id)
-        
-        report_text = (
-            f"🎯 **یک فضول در تله افتاد!** 😂\n\n"
-            f"👤 **نام:** {clicker_info['name']}\n"
-            f"🆔 **یوزرنیم:** {clicker_info['username']}\n"
-            f"📝 **بیوگرافی:** {clicker_info['bio']}\n"
-            f"⏰ **زمان:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
-        )
-        
-        keyboard = InlineKeyboardMarkup(row_width=2)
-        keyboard.add(
-            InlineKeyboardButton("📩 پیام ناشناس", callback_data=f"msg_{clicker_id}"),
-            InlineKeyboardButton("👤 مشاهده پروفایل", callback_data=f"profile_{clicker_id}")
-        )
-        
-        try:
-            if clicker_info['photo_id']:
-                bot.send_photo(owner_id, clicker_info['photo_id'], caption=report_text, reply_markup=keyboard, parse_mode='Markdown')
-            else:
-                bot.send_message(owner_id, report_text, reply_markup=keyboard, parse_mode='Markdown')
-        except:
-            pass
-
-def show_payment_page(chat_id, link_code, clicker_id, owner_id, message_id):
-    keyboard = InlineKeyboardMarkup(row_width=1)
-    keyboard.add(
-        InlineKeyboardButton("💳 پرداخت با کارت بانکی", callback_data=f"pay_{link_code}_{clicker_id}"),
-        InlineKeyboardButton("🔙 انصراف", callback_data=f"cancel_pay_{link_code}_{clicker_id}")
-    )
-    
-    payment_text = (
-        f"💰 **درخواست پول**\n\n"
-        f"با پرداخت فقط **6,500 تومان**، گزارش فضولی شما برای صاحب لینک ارسال نخواهد شد.\n\n"
-        f"📊 **جزئیات:**\n"
-        f"• لغو گزارش: 65,000 ریال\n"
-        f"• مبلغ: 65,000 ریال\n\n"
-        f"⬇️ برای پرداخت روی دکمه زیر کلیک کنید."
-    )
-    
-    bot.send_message(chat_id, payment_text, reply_markup=keyboard, parse_mode='Markdown')
+        return {"name": "کاربر ناشناس", "username": "نامشخص", "bio": "ندارد", "photo_id": None}
 
 # ---------- هندلر استارت ----------
 @bot.message_handler(commands=['start'])
@@ -174,28 +68,35 @@ def start(message):
         clicker_id = user_id
         
         if owner_id and owner_id != clicker_id:
-            owner_name = get_owner_name(owner_id)
-            
-            keyboard = InlineKeyboardMarkup()
-            keyboard.add(InlineKeyboardButton("❌ عدم ارسال گزارش فضولی 😊", callback_data=f"show_pay_{code}_{clicker_id}_{owner_id}"))
-            
+            # ========== 1. پیام به کلیک‌کننده (کاربر A) ==========
             trap_message = (
-                f"⚠️ **نبايد اين فضولی رو ميکردی!** 🥰\n\n"
-                f"الان اين فضوليت برای {owner_name} ارسال شد، "
-                f"بهتره قبل از اينکه بياد ببينه، خودت بهش بگی داشتی فضولی ميکردی 😊\n\n"
-                f"🕐 **زمان باقی‌مانده: ۱:۱۵**\n\n"
-                f"برای عدم ارسال دکمه زیر را فشار دهید:\n\n"
-                f"❌ عدم ارسال گزارش فضولی 😊"
+                f"⚠️ **نبايد اين فضولی رو ميکردی!** 😂\n\n"
+                f"الان اين فضوليت برای صاحب پروفایل ارسال شد.\n"
+                f"بهتره قبل از اينکه بياد ببينه، خودت بهش بگی داشتی فضولی ميکردی."
+            )
+            bot.send_message(clicker_id, trap_message, parse_mode='Markdown')
+            
+            # ========== 2. پیام به صاحب لینک (کاربر B) ==========
+            clicker_info = get_user_info(clicker_id)
+            
+            report_text = (
+                f"🎯 **یک فضول در تله افتاد!** 😂\n\n"
+                f"👤 **نام:** {clicker_info['name']}\n"
+                f"🆔 **یوزرنیم:** {clicker_info['username']}\n"
+                f"📝 **بیوگرافی:** {clicker_info['bio']}\n"
+                f"⏰ **زمان:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
             )
             
-            msg = bot.send_message(clicker_id, trap_message, reply_markup=keyboard, parse_mode='Markdown')
+            keyboard = InlineKeyboardMarkup(row_width=2)
+            keyboard.add(
+                InlineKeyboardButton("📩 پیام ناشناس", callback_data=f"msg_{clicker_id}"),
+                InlineKeyboardButton("👤 مشاهده پروفایل", callback_data=f"profile_{clicker_id}")
+            )
             
-            c.execute("INSERT INTO pending_reports (link_code, owner_id, clicker_id, message_id, expires_at) VALUES (?, ?, ?, ?, ?)",
-                      (code, owner_id, clicker_id, msg.message_id, datetime.now() + timedelta(seconds=75)))
-            conn.commit()
-            
-            threading.Thread(target=delete_message_later, args=(clicker_id, msg.message_id, 75, clicker_id, owner_name)).start()
-            threading.Thread(target=send_report_after_delay, args=(code, owner_id, clicker_id, 75)).start()
+            if clicker_info['photo_id']:
+                bot.send_photo(owner_id, clicker_info['photo_id'], caption=report_text, reply_markup=keyboard, parse_mode='Markdown')
+            else:
+                bot.send_message(owner_id, report_text, reply_markup=keyboard, parse_mode='Markdown')
             
         elif owner_id == clicker_id:
             bot.send_message(clicker_id, "⚠️ این لینک مال خودته!")
@@ -215,72 +116,9 @@ def get_link(message):
 @bot.callback_query_handler(func=lambda call: True)
 def handle_buttons(call):
     data = call.data
-    user_id = call.from_user.id
     
-    if data.startswith("show_pay_"):
-        _, _, link_code, clicker_id, owner_id = data.split("_")
-        clicker_id = int(clicker_id)
-        owner_id = int(owner_id)
-        
-        if user_id != clicker_id:
-            bot.answer_callback_query(call.id, "این دکمه مال تو نیست!", show_alert=True)
-            return
-        
-        c.execute("SELECT message_id FROM pending_reports WHERE link_code = ? AND clicker_id = ? ORDER BY id DESC LIMIT 1", 
-                  (link_code, clicker_id))
-        result = c.fetchone()
-        
-        if result:
-            try:
-                bot.delete_message(call.message.chat.id, result[0])
-            except:
-                pass
-        
-        show_payment_page(call.message.chat.id, link_code, clicker_id, owner_id, result[0] if result else None)
-        bot.answer_callback_query(call.id)
-    
-    elif data.startswith("pay_"):
-        _, _, link_code, clicker_id = data.split("_")
-        clicker_id = int(clicker_id)
-        
-        if user_id != clicker_id:
-            bot.answer_callback_query(call.id, "این دکمه مال تو نیست!", show_alert=True)
-            return
-        
-        c.execute("UPDATE pending_reports SET paid = TRUE, cancelled = TRUE WHERE link_code = ? AND clicker_id = ?", 
-                  (link_code, clicker_id))
-        conn.commit()
-        
-        try:
-            bot.delete_message(call.message.chat.id, call.message.message_id)
-        except:
-            pass
-        
-        confirm_message = (
-            "✅ **پرداخت با موفقیت انجام شد!**\n\n"
-            "گزارش فضولی شما ارسال نشد.\n"
-            "اين فرصت رو غنيمت بدون و ديگه فضولی نکن 😊"
-        )
-        bot.send_message(call.message.chat.id, confirm_message, parse_mode='Markdown')
-        bot.answer_callback_query(call.id, "پرداخت موفق!")
-    
-    elif data.startswith("cancel_pay_"):
-        _, _, _, link_code, clicker_id = data.split("_")
-        clicker_id = int(clicker_id)
-        
-        if user_id != clicker_id:
-            bot.answer_callback_query(call.id, "این دکمه مال تو نیست!", show_alert=True)
-            return
-        
-        try:
-            bot.delete_message(call.message.chat.id, call.message.message_id)
-        except:
-            pass
-        
-        bot.send_message(call.message.chat.id, "❌ از پرداخت انصراف دادید. گزارش فضولی ارسال خواهد شد.")
-        bot.answer_callback_query(call.id, "انصراف از پرداخت")
-    
-    elif data.startswith("profile_"):
+    # مشاهده پروفایل
+    if data.startswith("profile_"):
         target_id = int(data.split("_")[1])
         
         try:
@@ -313,6 +151,7 @@ def handle_buttons(call):
         
         bot.answer_callback_query(call.id)
     
+    # ارسال پیام ناشناس
     elif data.startswith("msg_"):
         target_id = int(data.split("_")[1])
         bot.send_message(call.message.chat.id, "✍️ **پیام ناشناس خود را بنویسید:**", parse_mode='Markdown')
