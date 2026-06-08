@@ -67,7 +67,7 @@ def get_ip():
     return request.remote_addr
 
 def generate_link(telegram_id):
-    # استفاده از آیدی عددی ثابت کاربر (همیشه یکسان)
+    # استفاده از آیدی عددی ثابت کاربر
     code = str(telegram_id)
     full_link = f"https://t.me/{BOT_USERNAME}?start=track_{code}"
     c.execute("INSERT OR REPLACE INTO users (telegram_id, link_code, link_full) VALUES (?, ?, ?)", 
@@ -76,14 +76,11 @@ def generate_link(telegram_id):
     return full_link
 
 def get_owner_id_by_code(code):
-    # کد همان آیدی عددی کاربر است
+    # کد دقیقاً همان آیدی عددی کاربر است
     try:
         return int(code)
     except:
-        # برای سازگاری با لینک‌های قدیمی
-        c.execute("SELECT telegram_id FROM users WHERE link_code = ?", (code,))
-        result = c.fetchone()
-        return result[0] if result else None
+        return None
 
 def get_user_capture_text(user_id):
     c.execute("SELECT capture_text FROM user_settings WHERE telegram_id = ?", (user_id,))
@@ -147,6 +144,17 @@ def get_clicker_info(clicker_id):
             "photo_id": None,
             "telegram_id": clicker_id
         }
+
+def get_owner_name(owner_id):
+    """دریافت نام صاحب لینک برای نمایش در پیام تله"""
+    try:
+        chat = bot.get_chat(owner_id)
+        first_name = chat.first_name or ""
+        last_name = chat.last_name or ""
+        name = f"{first_name} {last_name}".strip()
+        return name if name else "صاحب پروفایل"
+    except:
+        return "صاحب پروفایل"
 
 # ---------- بررسی عضویت ----------
 def is_user_member(user_id):
@@ -256,7 +264,7 @@ def handle_reply_buttons(message):
     
     if text == "🔗 دریافت لینک من":
         link = generate_link(user_id)
-        link_code = link.split('track_')[-1]
+        link_code = str(user_id)  # آیدی عددی کاربر
         
         inline_keyboard = InlineKeyboardMarkup(row_width=2)
         inline_keyboard.add(
@@ -317,7 +325,7 @@ def handle_reply_buttons(message):
     else:
         bot.send_message(chat_id, "❌ لطفاً از دکمه‌های زیر استفاده کنید.", reply_markup=get_main_reply_keyboard())
 
-# ---------- هندلر دستور start (بخش اصلی تله با تایمر) ----------
+# ---------- هندلر دستور start (بخش اصلی تله) ----------
 @bot.message_handler(commands=['start'])
 def start(message):
     user_id = message.from_user.id
@@ -344,16 +352,19 @@ def start(message):
                       (code, owner_id, clicker_id, expires_at))
             conn.commit()
             
-            # ========== پیام به فضول (کلیک‌کننده) با تایمر و دکمه لغو ==========
+            # دریافت نام صاحب لینک برای نمایش در پیام تله
+            owner_name = get_owner_name(owner_id)
+            
+            # ========== پیام به فضول (کلیک‌کننده) با فرمت جدید ==========
             keyboard = InlineKeyboardMarkup()
-            keyboard.add(InlineKeyboardButton("❌ عدم ارسال گزارش فضولی", callback_data=f"cancel_{code}_{clicker_id}"))
+            keyboard.add(InlineKeyboardButton("❌ عدم ارسال گزارش فضولی 😂", callback_data=f"cancel_{code}_{clicker_id}"))
             
             trap_message = (
-                "🎯 **شما در تله افتادید!**\n\n"
-                "صاحب این پروفایل متوجه شد که روی لینک اختصاصی او کلیک کرده‌اید.\n\n"
-                "⏳ تا ۷۵ ثانیه دیگر مشخصات شما برای صاحب پروفایل ارسال خواهد شد.\n\n"
-                "🕐 زمان باقی‌مانده: ۱:۱۵\n\n"
-                "اگر نمی‌خواهید گزارش ارسال شود، روی دکمه زیر کلیک کنید."
+                f"⚠️ **نباید این فضولی رو میکردی!**\n\n"
+                f"الان این فضولیت برای {owner_name} ارسال شد، "
+                f"بهتره قبل از اینکه بیاد ببینه، خودت بهش بگی داشتی فضولی میکردی 😂\n\n"
+                f"🕐 **برای عدم ارسال، دکمه زیر را فشار دهید (فرصت شما 1 دقیقه و 15 ثانیه)**\n\n"
+                f"❌ عدم ارسال گزارش فضولی 😂"
             )
             
             try:
