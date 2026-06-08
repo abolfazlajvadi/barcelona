@@ -245,9 +245,9 @@ def show_info(call):
 def anonymous_message(call):
     target_id = int(call.data.split("_")[1])
     msg = bot.send_message(call.message.chat.id, "✍️ **پیام ناشناس خود را بنویسید:**", parse_mode='Markdown')
-    bot.register_next_step_handler(msg, lambda m: send_anonymous_message(m, target_id))
+    bot.register_next_step_handler(msg, lambda m: send_anonymous_message_handler(m, target_id))
 
-def send_anonymous_message(message, target_id):
+def send_anonymous_message_handler(message, target_id):
     sender_id = message.from_user.id
     if message.text:
         try:
