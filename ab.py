@@ -10,7 +10,7 @@ import threading
 
 # ---------- تنظیمات اولیه ----------
 TOKEN = "8981742192:AAHC8z6u6GifXgMIafvzv0tn_Q2LV1mM2bQ"
-BOT_USERNAME = "YOUR_BOT_USERNAME"  # بدون @ - این را به یوزرنیم ربات خود تغییر دهید
+BOT_USERNAME = "nevergivup_bot"  # بدون @ - این را به یوزرنیم ربات خود تغییر دهید
 BASE_URL = "https://barcelona-l5tu.onrender.com"
 CHANNELS = ["@film01385"]
 CHANNEL_NAMES = {
