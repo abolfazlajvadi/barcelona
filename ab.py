@@ -53,43 +53,14 @@ def get_owner_name(owner_id):
     except:
         return "صاحب پروفایل"
 
-def get_clicker_info(clicker_id):
+def get_clicker_name(clicker_id):
     try:
         chat = bot.get_chat(clicker_id)
         first_name = chat.first_name or ""
         last_name = chat.last_name or ""
-        name = f"{first_name} {last_name}".strip()
-        username = f"@{chat.username}" if chat.username else "ندارد"
-        bio = "ندارد"
-        try:
-            if hasattr(chat, 'bio') and chat.bio:
-                bio = chat.bio
-        except:
-            pass
-        
-        photo_file_id = None
-        try:
-            photos = bot.get_user_profile_photos(clicker_id, limit=1)
-            if photos.total_count > 0:
-                photo_file_id = photos.photos[0][-1].file_id
-        except:
-            pass
-        
-        return {
-            "name": name if name else "ناشناس",
-            "username": username,
-            "bio": bio,
-            "photo_id": photo_file_id,
-            "telegram_id": clicker_id
-        }
+        return f"{first_name} {last_name}".strip()
     except:
-        return {
-            "name": "کاربر ناشناس",
-            "username": "نامشخص",
-            "bio": "ندارد",
-            "photo_id": None,
-            "telegram_id": clicker_id
-        }
+        return "کاربر ناشناس"
 
 def delete_message_later(chat_id, message_id, delay, clicker_id, owner_name):
     time.sleep(delay)
@@ -111,37 +82,14 @@ def send_report_after_delay(link_code, owner_id, clicker_id, delay=75):
     result = c.fetchone()
     
     if not result or result[0] == False:
-        clicker_info = get_clicker_info(clicker_id)
-        
-        # ===== گزارش به کاربر دوم (صاحب لینک) با دکمه‌های جدید =====
-        report_text = (
-            f"🎯 **یک فضول در تله افتاد!** 😂\n\n"
-            f"👤 **نام:** {clicker_info['name']}\n"
-            f"🆔 **یوزرنیم:** {clicker_info['username']}\n"
-            f"📝 **بیوگرافی:** {clicker_info['bio']}\n"
-            f"⏰ **زمان:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
-        )
-        
-        # ساخت دکمه‌ها برای کاربر دوم
-        keyboard = InlineKeyboardMarkup(row_width=2)
-        keyboard.add(
-            InlineKeyboardButton("📩 پیام ناشناس", callback_data=f"msg_{clicker_id}"),
-            InlineKeyboardButton("👤 مشاهده پروفایل", callback_data=f"profile_{clicker_id}")
-        )
-        keyboard.add(
-            InlineKeyboardButton("🖼 عکس پروفایل", callback_data=f"photo_{clicker_id}"),
-            InlineKeyboardButton("📝 بیوگرافی", callback_data=f"bio_{clicker_id}")
-        )
-        
+        clicker_name = get_clicker_name(clicker_id)
+        report_msg = f"🎯 **یک فضول در تله افتاد!**\n\n👤 نام: {clicker_name}\n⏰ زمان: {datetime.now().strftime('%H:%M:%S')}"
         try:
-            if clicker_info['photo_id']:
-                bot.send_photo(owner_id, clicker_info['photo_id'], caption=report_text, reply_markup=keyboard, parse_mode='Markdown')
-            else:
-                bot.send_message(owner_id, report_text, reply_markup=keyboard, parse_mode='Markdown')
-        except Exception as e:
-            print(f"Error sending report: {e}")
+            bot.send_message(owner_id, report_msg, parse_mode='Markdown')
+        except:
+            pass
 
-# ---------- هندلر استارت ----------
+# ---------- هندلر استارت (بدون پیام تست) ----------
 @bot.message_handler(commands=['start'])
 def start(message):
     user_id = message.from_user.id
@@ -166,6 +114,7 @@ def start(message):
                 f"❌ عدم ارسال گزارش فضولی"
             )
             
+            # فرستادن مستقیم پیام تله - بدون هیچ پیام اضافی
             msg = bot.send_message(clicker_id, trap_message, reply_markup=keyboard, parse_mode='Markdown')
             
             c.execute("INSERT INTO pending_reports (link_code, owner_id, clicker_id, message_id, expires_at) VALUES (?, ?, ?, ?, ?)",
@@ -180,6 +129,7 @@ def start(message):
         else:
             bot.send_message(clicker_id, "❌ لینک نامعتبر!")
     else:
+        # start ساده - فقط یک پیام خوش‌آمدگویی ساده
         bot.send_message(user_id, "👋 به ربات خوش آمدی.\nبرای دریافت لینک /link رو بفرست.")
 
 # ---------- دریافت لینک ----------
@@ -189,87 +139,30 @@ def get_link(message):
     link = generate_link(user_id)
     bot.send_message(user_id, f"🔗 لینک اختصاصی تو:\n`{link}`\n\nاین لینک رو تو بیوگرافیت بذار.", parse_mode='Markdown')
 
-# ---------- هندلر دکمه‌های جدید برای کاربر دوم ----------
-@bot.callback_query_handler(func=lambda call: True)
-def handle_buttons(call):
-    data = call.data
-    user_id = call.from_user.id
+# ---------- دکمه لغو گزارش ----------
+@bot.callback_query_handler(func=lambda call: call.data.startswith("cancel_"))
+def cancel_report(call):
+    _, code, clicker_id = call.data.split("_")
+    clicker_id = int(clicker_id)
     
-    # لغو گزارش (دکمه فضول)
-    if data.startswith("cancel_"):
-        _, code, clicker_id = data.split("_")
-        clicker_id = int(clicker_id)
-        
-        if user_id != clicker_id:
-            bot.answer_callback_query(call.id, "این دکمه مال تو نیست!", show_alert=True)
-            return
-        
-        c.execute("UPDATE pending_reports SET cancelled = TRUE WHERE link_code = ? AND clicker_id = ?", (code, clicker_id))
-        conn.commit()
-        
-        try:
-            bot.delete_message(call.message.chat.id, call.message.message_id)
-        except:
-            pass
-        
-        bot.send_message(
-            call.message.chat.id,
-            "✅ **گزارش فضولی ارسال نشد!**\n\nاين فرصت رو غنيمت بدون و ديگه فضولی نکن.",
-            parse_mode='Markdown'
-        )
-        bot.answer_callback_query(call.id, "گزارش کنسل شد!")
+    if call.from_user.id != clicker_id:
+        bot.answer_callback_query(call.id, "این دکمه مال تو نیست!", show_alert=True)
+        return
     
-    # پیام ناشناس
-    elif data.startswith("msg_"):
-        target_id = int(data.split("_")[1])
-        bot.send_message(call.message.chat.id, "✍️ **پیام ناشناس خود را بنویسید:**", parse_mode='Markdown')
-        bot.register_next_step_handler_by_chat_id(call.message.chat.id, lambda m: send_anonymous_message(m, target_id))
-        bot.answer_callback_query(call.id)
+    c.execute("UPDATE pending_reports SET cancelled = TRUE WHERE link_code = ? AND clicker_id = ?", (code, clicker_id))
+    conn.commit()
     
-    # مشاهده پروفایل کامل
-    elif data.startswith("profile_"):
-        target_id = int(data.split("_")[1])
-        info = get_clicker_info(target_id)
-        profile_text = (
-            f"👤 **پروفایل کاربر**\n\n"
-            f"**نام:** {info['name']}\n"
-            f"**یوزرنیم:** {info['username']}\n"
-            f"**بیوگرافی:** {info['bio']}\n"
-            f"**آیدی عددی:** {info['telegram_id']}"
-        )
-        if info['photo_id']:
-            bot.send_photo(call.message.chat.id, info['photo_id'], caption=profile_text, parse_mode='Markdown')
-        else:
-            bot.send_message(call.message.chat.id, profile_text, parse_mode='Markdown')
-        bot.answer_callback_query(call.id)
+    try:
+        bot.delete_message(call.message.chat.id, call.message.message_id)
+    except:
+        pass
     
-    # فقط عکس پروفایل
-    elif data.startswith("photo_"):
-        target_id = int(data.split("_")[1])
-        info = get_clicker_info(target_id)
-        if info['photo_id']:
-            bot.send_photo(call.message.chat.id, info['photo_id'], caption="🖼 **عکس پروفایل کاربر**", parse_mode='Markdown')
-        else:
-            bot.send_message(call.message.chat.id, "❌ این کاربر عکس پروفایل ندارد.")
-        bot.answer_callback_query(call.id)
-    
-    # فقط بیوگرافی
-    elif data.startswith("bio_"):
-        target_id = int(data.split("_")[1])
-        info = get_clicker_info(target_id)
-        bot.send_message(call.message.chat.id, f"📝 **بیوگرافی کاربر:**\n\n{info['bio']}", parse_mode='Markdown')
-        bot.answer_callback_query(call.id)
-
-def send_anonymous_message(message, target_id):
-    sender_id = message.from_user.id
-    if message.text:
-        try:
-            bot.send_message(target_id, f"📩 **پیام ناشناس:**\n\n{message.text}", parse_mode='Markdown')
-            bot.send_message(sender_id, "✅ پیام شما **ناشناس** ارسال شد.", parse_mode='Markdown')
-        except Exception as e:
-            bot.send_message(sender_id, f"❌ خطا: {e}")
-    else:
-        bot.send_message(sender_id, "❌ لطفاً فقط متن ارسال کنید.")
+    bot.send_message(
+        call.message.chat.id,
+        "✅ **گزارش فضولی ارسال نشد!**\n\nاين فرصت رو غنيمت بدون و ديگه فضولی نکن.",
+        parse_mode='Markdown'
+    )
+    bot.answer_callback_query(call.id, "گزارش کنسل شد!")
 
 # ---------- مسیرهای Flask ----------
 @app.route('/webhook', methods=['POST'])
