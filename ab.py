@@ -10,7 +10,7 @@ import threading
 
 # ---------- تنظیمات اولیه ----------
 TOKEN = "8981742192:AAHC8z6u6GifXgMIafvzv0tn_Q2LV1mM2bQ"
-BOT_USERNAME = "nevergivup_bot"  # بدون @ - این را به یوزرنیم ربات خود تغییر دهید
+BOT_USERNAME = "nevergivup_bot"
 BASE_URL = "https://barcelona-l5tu.onrender.com"
 CHANNELS = ["@film01385"]
 CHANNEL_NAMES = {
@@ -270,7 +270,7 @@ def handle_reply_buttons(message):
     else:
         bot.send_message(chat_id, "❌ لطفاً از دکمه‌های زیر استفاده کنید.", reply_markup=get_main_reply_keyboard())
 
-# ---------- هندلر دستور start ----------
+# ---------- هندلر دستور start (قسمت اصلی تله) ----------
 @bot.message_handler(commands=['start'])
 def start(message):
     user_id = message.from_user.id
