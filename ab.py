@@ -5,7 +5,7 @@ import string
 from datetime import datetime
 from flask import Flask, request, redirect, jsonify
 import telebot
-from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
+from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardMarkup, KeyboardButton
 import threading
 
 # ---------- تنظیمات اولیه ----------
@@ -100,22 +100,143 @@ def is_user_member(user_id):
             return False
     return True
 
-# ---------- نمایش پنل کاربری ----------
-def show_panel(chat_id, message_id=None):
-    keyboard = InlineKeyboardMarkup(row_width=1)
-    keyboard.add(InlineKeyboardButton("🔗 دریافت لینک من", callback_data="get_link"))
-    keyboard.add(InlineKeyboardButton("💰 خرید اشتراک پرو", callback_data="buy_sub"))
-    keyboard.add(InlineKeyboardButton("🛡 خرید سپر (حفاظت و مچ‌گیری آنی)", callback_data="buy_shield"))
-    keyboard.add(InlineKeyboardButton("🖼 تنظیم عکس مچ‌گیری", callback_data="set_photo"))
-    keyboard.add(InlineKeyboardButton("✏️ تنظیم متن مچ‌گیری", callback_data="set_text"))
-    keyboard.add(InlineKeyboardButton("📖 راهنما", callback_data="help"))
+# ---------- ایجاد Reply Keyboard (صفحه‌کلید دائمی) ----------
+def get_main_reply_keyboard():
+    """ساخت صفحه کلید دائمی با دکمه‌های شیشه‌ای"""
+    keyboard = ReplyKeyboardMarkup(
+        row_width=2,  # تعداد دکمه در هر ردیف
+        resize_keyboard=True,  # اندازه کیبورد را با صفحه هماهنگ کن
+        one_time_keyboard=False,  # کیبورد پس از استفاده بسته نشود (دائمی)
+        input_field_placeholder="یک گزینه را انتخاب کنید..."  # متن راهنما در باکس ورودی
+    )
     
+    # ایجاد دکمه‌ها
+    btn_get_link = KeyboardButton("🔗 دریافت لینک من")
+    btn_buy_sub = KeyboardButton("💰 خرید اشتراک پرو")
+    btn_buy_shield = KeyboardButton("🛡 خرید سپر")
+    btn_set_photo = KeyboardButton("🖼 تنظیم عکس مچ‌گیری")
+    btn_set_text = KeyboardButton("✏️ تنظیم متن مچ‌گیری")
+    btn_help = KeyboardButton("📖 راهنما")
+    
+    # چیدمان دکمه‌ها در کیبورد
+    keyboard.add(btn_get_link, btn_buy_sub)
+    keyboard.add(btn_buy_shield, btn_set_photo)
+    keyboard.add(btn_set_text, btn_help)
+    
+    return keyboard
+
+# ---------- نمایش پنل کاربری با Reply Keyboard ----------
+def show_panel(chat_id, message_id=None):
+    # ساخت Inline Keyboard برای عملیات خاص (مثل کپی، مخفی کردن و...)
+    # توجه: Reply Keyboard قبلاً ارسال شده، اینجا فقط در صورت نیاز از Inline استفاده می‌کنیم
     text = "👋 به پنل کاربری خود خوش آمدید.\n\nلطفاً یکی از گزینه‌های زیر را انتخاب کنید:"
     
     if message_id:
-        bot.edit_message_text(text, chat_id, message_id, reply_markup=keyboard)
+        # اگر در حال ادیت یک پیام هستیم، فقط متن را ادیت می‌کنیم (Reply Keyboard قبلاً وجود دارد)
+        bot.edit_message_text(text, chat_id, message_id)
     else:
-        bot.send_message(chat_id, text, reply_markup=keyboard)
+        # ارسال پیام جدید همراه با Reply Keyboard
+        reply_keyboard = get_main_reply_keyboard()
+        bot.send_message(chat_id, text, reply_markup=reply_keyboard)
+
+# ---------- هندلر جدید برای مدیریت دکمه‌های Reply Keyboard ----------
+@bot.message_handler(func=lambda message: True)
+def handle_reply_buttons(message):
+    """هندلر تمام پیام‌های متنی - برای تشخیص دکمه‌های Reply Keyboard"""
+    user_id = message.from_user.id
+    chat_id = message.chat.id
+    text = message.text
+    
+    # بررسی اینکه کاربر عضو کانال هست یا نه
+    if not is_user_member(user_id):
+        # اگر عضو نیست، درخواست عضویت بده
+        keyboard = InlineKeyboardMarkup(row_width=1)
+        for channel in CHANNELS:
+            display_name = CHANNEL_NAMES.get(channel, channel)
+            keyboard.add(InlineKeyboardButton(f"🔹 {display_name}", url=f"https://t.me/{channel[1:]}"))
+        keyboard.add(InlineKeyboardButton("✅ عضو شدم", callback_data="check_membership"))
+        bot.reply_to(message, "👋 برای استفاده از ربات ابتدا در کانال های زیر عضو شوید:", reply_markup=keyboard, parse_mode='Markdown')
+        return
+    
+    # پردازش دکمه‌های Reply Keyboard
+    if text == "🔗 دریافت لینک من":
+        link = generate_link(user_id)
+        link_code = link.split('/')[-1]
+        
+        # ساخت Inline Keyboard برای عملیات لینک
+        inline_keyboard = InlineKeyboardMarkup(row_width=2)
+        inline_keyboard.add(
+            InlineKeyboardButton("📋 کپی لینک من", callback_data=f"copy_{link_code}"),
+            InlineKeyboardButton("🔒 مخفی کردن لینک", callback_data="hide_link")
+        )
+        
+        msg = bot.send_message(
+            chat_id,
+            f"🔗 **لینک اختصاصی شما:**\n\n"
+            f"`{link}`",
+            reply_markup=inline_keyboard,
+            parse_mode='Markdown'
+        )
+        
+        user_link_messages[user_id] = {
+            "chat_id": chat_id,
+            "message_id": msg.message_id,
+            "link_code": link_code
+        }
+    
+    elif text == "💰 خرید اشتراک پرو":
+        bot.send_message(chat_id, "💰 بخش خرید اشتراک پرو در حال توسعه است.\nبه زودی...")
+    
+    elif text == "🛡 خرید سپر":
+        bot.send_message(chat_id, "🛡 بخش خرید سپر در حال توسعه است.\nبه زودی...")
+    
+    elif text == "🖼 تنظیم عکس مچ‌گیری":
+        msg = bot.send_message(
+            chat_id,
+            "🖼 لطفاً عکس مورد نظر خود را برای پیام مچ‌گیری ارسال کنید.\n\n"
+            "پس از ارسال عکس، تنظیمات شما ذخیره می‌شود."
+        )
+        bot.register_next_step_handler(msg, receive_capture_photo)
+    
+    elif text == "✏️ تنظیم متن مچ‌گیری":
+        msg = bot.send_message(
+            chat_id,
+            "✏️ لطفاً متن مورد نظر خود را برای پیام مچ‌گیری ارسال کنید.\n\n"
+            "پس از ارسال متن، تنظیمات شما ذخیره می‌شود."
+        )
+        bot.register_next_step_handler(msg, receive_capture_text)
+    
+    elif text == "📖 راهنما":
+        help_text = (
+            "📚 **راهنمای جامع استفاده از ربات**\n\n"
+            "**۱. نحوه کارکرد ربات (سیستم مچ‌گیری):**\n"
+            "شما می‌توانید با دریافت لینک اختصاصی خود از طریق ربات و قرار دادن آن در بخش بیوگرافی (Bio) "
+            "حساب کاربری‌تان، متوجه شوید چه کسانی در حال بازدید از پروفایل شما هستند.\n\n"
+            "به محض اینکه شخصی از روی کنجکاوی روی لینک شما کلیک کرده و وارد ربات شود، "
+            "ربات فوراً پیامی با مضمون «یک فضول در تله افتاد!» برای شما ارسال می‌کند. "
+            "این گزارش شامل اطلاعات کامل شخص است:\n"
+            "▫️ نام کاربر\n▫️ آیدی (لینک ورود به پیوی)\n▫️ عکس پروفایل\n▫️ بیوگرافی (در صورت وجود)\n\n"
+            "**۲. اشتراک ویژه (پرو - ۳۰ روزه):**\n"
+            "با تهیه اشتراک پرو، امکانات پیشرفته زیر در اختیار شما قرار می‌گیرد:\n"
+            "🔹 **ارسال پیام ناشناس:** می‌توانید از طریق ربات، برای شخصی که در تله شما افتاده است به صورت کاملاً ناشناس پیام ارسال کنید.\n"
+            "🔹 **مشاهده پروفایل افراد بدون آیدی:** اگر شخصی که در تله افتاده آیدی عمومی (Username) نداشته باشد، "
+            "با اشتراک پرو همچنان می‌توانید عکس پروفایل و بیوگرافی او را مشاهده کنید.\n\n"
+            "**۳. شخصی‌سازی تله (متن و عکس مچ‌گیری):**\n"
+            "شما می‌توانید واکنش ربات به فردی که در تله می‌افتد را کاملاً شخصی‌سازی کنید:\n"
+            "🔹 **تنظیم متن مچ‌گیری:** پیامی که فرد به محض کلیک روی لینک شما دریافت می‌کند را تغییر دهید.\n"
+            "🔹 **تنظیم عکس مچ‌گیری:** علاوه بر متن، می‌توانید یک تصویر دلخواه تنظیم کنید تا به محض ورود شخص، آن عکس نیز برای وی ارسال شود.\n\n"
+            "**۴. اشتراک سپر (محافظت و مچ‌گیری آنی):**\n"
+            "داشتن اشتراک سپر، امنیت و سرعت شما را به حداکثر می‌رساند:\n"
+            "🔹 **محافظت از شما:** اگر خودتان روی لینک شخص دیگری کلیک کنید و در تله بیفتید، گزارش ورود شما کاملاً مسدود شده و برای طرف مقابل ارسال نخواهد شد.\n"
+            "🔹 **گزارش آنی و قطعی:** به محض اینکه شخصی در تله شما بیفتد، گزارش آن بدون هیچ وقفه‌ای و به صورت آنی برای شما ارسال می‌شود.\n\n"
+            "💬 در صورت بروز هرگونه مشکل یا داشتن سوالات بیشتر، با @Ao_0077 در ارتباط باشید."
+        )
+        
+        bot.send_message(chat_id, help_text, parse_mode='Markdown')
+    
+    else:
+        # اگر پیام متنی معمولی بود که با دکمه‌ها مطابقت ندارد
+        bot.send_message(chat_id, "❌ لطفاً از دکمه‌های زیر استفاده کنید.", reply_markup=get_main_reply_keyboard())
 
 # ---------- هندلر دستور start ----------
 @bot.message_handler(commands=['start'])
@@ -142,7 +263,7 @@ def start(message):
             parse_mode='Markdown'
         )
 
-# ---------- هندلر دکمه‌های شیشه‌ای ----------
+# ---------- هندلر دکمه‌های Inline (شیشه‌ای داخل پیام) ----------
 @bot.callback_query_handler(func=lambda call: True)
 def handle_buttons(call):
     user_id = call.from_user.id
@@ -154,30 +275,6 @@ def handle_buttons(call):
             show_panel(chat_id)
         else:
             bot.answer_callback_query(call.id, "❌ شما هنوز در همه کانال‌ها عضو نشده‌اید.", show_alert=True)
-    
-    elif call.data == "get_link":
-        link = generate_link(user_id)
-        link_code = link.split('/')[-1]
-        
-        keyboard = InlineKeyboardMarkup(row_width=2)
-        keyboard.add(
-            InlineKeyboardButton("📋 کپی لینک من", callback_data=f"copy_{link_code}"),
-            InlineKeyboardButton("🔒 مخفی کردن لینک", callback_data="hide_link")
-        )
-        
-        msg = bot.edit_message_text(
-            f"🔗 **لینک اختصاصی شما:**\n\n"
-            f"`{link}`",
-            chat_id, call.message.message_id,
-            reply_markup=keyboard,
-            parse_mode='Markdown'
-        )
-        
-        user_link_messages[user_id] = {
-            "chat_id": chat_id,
-            "message_id": msg.message_id,
-            "link_code": link_code
-        }
     
     elif call.data.startswith("copy_"):
         link_code = call.data.split("_")[1]
@@ -191,67 +288,6 @@ def handle_buttons(call):
             chat_id, call.message.message_id
         )
         threading.Timer(2.0, lambda: show_panel(chat_id)).start()
-    
-    elif call.data == "buy_sub":
-        bot.answer_callback_query(call.id, "💰 بخش خرید اشتراک پرو در حال توسعه است.\nبه زودی...", show_alert=True)
-    
-    elif call.data == "buy_shield":
-        bot.answer_callback_query(call.id, "🛡 بخش خرید سپر در حال توسعه است.\nبه زودی...", show_alert=True)
-    
-    elif call.data == "set_photo":
-        bot.edit_message_text(
-            "🖼 لطفاً عکس مورد نظر خود را برای پیام مچ‌گیری ارسال کنید.\n\n"
-            "پس از ارسال عکس، تنظیمات شما ذخیره می‌شود.",
-            chat_id, call.message.message_id
-        )
-        bot.register_next_step_handler_by_chat_id(chat_id, receive_capture_photo)
-    
-    elif call.data == "set_text":
-        bot.edit_message_text(
-            "✏️ لطفاً متن مورد نظر خود را برای پیام مچ‌گیری ارسال کنید.\n\n"
-            "پس از ارسال متن، تنظیمات شما ذخیره می‌شود.",
-            chat_id, call.message.message_id
-        )
-        bot.register_next_step_handler_by_chat_id(chat_id, receive_capture_text)
-    
-    elif call.data == "help":
-        help_text = (
-            "📚 **راهنمای جامع استفاده از ربات**\n\n"
-            "**۱. نحوه کارکرد ربات (سیستم مچ‌گیری):**\n"
-            "شما می‌توانید با دریافت لینک اختصاصی خود از طریق ربات و قرار دادن آن در بخش بیوگرافی (Bio) "
-            "حساب کاربری‌تان، متوجه شوید چه کسانی در حال بازدید از پروفایل شما هستند.\n\n"
-            "به محض اینکه شخصی از روی کنجکاوی روی لینک شما کلیک کرده و وارد ربات شود، "
-            "ربات فوراً پیامی با مضمون «یک فضول در تله افتاد!» برای شما ارسال می‌کند. "
-            "این گزارش شامل اطلاعات کامل شخص است:\n"
-            "▫️ نام کاربر\n▫️ آیدی (لینک ورود به پیوی)\n▫️ عکس پروفایل\n▫️ بیوگرافی (در صورت وجود)\n\n"
-            "**۲. اشتراک ویژه (پرو - ۳۰ روزه):**\n"
-            "با تهیه اشتراک پرو، امکانات پیشرفته زیر در اختیار شما قرار می‌گیرد:\n"
-            "🔹 **ارسال پیام ناشناس:** می‌توانید از طریق ربات، برای شخصی که در تله شما افتاده است به صورت کاملاً ناشناس پیام ارسال کنید.\n"
-            "🔹 **مشاهده پروفایل افراد بدون آیدی:** اگر شخصی که در تله افتاده آیدی عمومی (Username) نداشته باشد، "
-            "با اشتراک پرو همچنان می‌توانید عکس پروفایل و بیوگرافی او را مشاهده کنید.\n\n"
-            "**۳. شخصی‌سازی تله (متن و عکس مچ‌گیری):**\n"
-            "شما می‌توانید واکنش ربات به فردی که در تله می‌افتد را کاملاً شخصی‌سازی کنید:\n"
-            "🔹 **تنظیم متن مچ‌گیری:** پیامی که فرد به محض کلیک روی لینک شما دریافت می‌کند را تغییر دهید.\n"
-            "🔹 **تنظیم عکس مچ‌گیری:** علاوه بر متن، می‌توانید یک تصویر دلخواه تنظیم کنید تا به محض ورود شخص، آن عکس نیز برای وی ارسال شود.\n\n"
-            "**۴. اشتراک سپر (محافظت و مچ‌گیری آنی):**\n"
-            "داشتن اشتراک سپر، امنیت و سرعت شما را به حداکثر می‌رساند:\n"
-            "🔹 **محافظت از شما:** اگر خودتان روی لینک شخص دیگری کلیک کنید و در تله بیفتید، گزارش ورود شما کاملاً مسدود شده و برای طرف مقابل ارسال نخواهد شد.\n"
-            "🔹 **گزارش آنی و قطعی:** به محض اینکه شخصی در تله شما بیفتد، گزارش آن بدون هیچ وقفه‌ای و به صورت آنی برای شما ارسال می‌شود.\n\n"
-            "💬 در صورت بروز هرگونه مشکل یا داشتن سوالات بیشتر، با @Ao_0077 در ارتباط باشید."
-        )
-        
-        keyboard = InlineKeyboardMarkup()
-        keyboard.add(InlineKeyboardButton("🔙 بازگشت به پنل", callback_data="back_to_panel"))
-        
-        bot.edit_message_text(
-            help_text,
-            chat_id, call.message.message_id,
-            reply_markup=keyboard,
-            parse_mode='Markdown'
-        )
-    
-    elif call.data == "back_to_panel":
-        show_panel(chat_id, call.message.message_id)
 
 # ---------- دریافت متن مچ‌گیری ----------
 def receive_capture_text(message):
