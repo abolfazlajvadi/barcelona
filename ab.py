@@ -264,7 +264,7 @@ def handle_reply_buttons(message):
     
     if text == "🔗 دریافت لینک من":
         link = generate_link(user_id)
-        link_code = str(user_id)  # آیدی عددی کاربر
+        link_code = str(user_id)
         
         inline_keyboard = InlineKeyboardMarkup(row_width=2)
         inline_keyboard.add(
@@ -325,11 +325,14 @@ def handle_reply_buttons(message):
     else:
         bot.send_message(chat_id, "❌ لطفاً از دکمه‌های زیر استفاده کنید.", reply_markup=get_main_reply_keyboard())
 
-# ---------- هندلر دستور start (بخش اصلی تله) ----------
+# ---------- هندلر دستور start (بخش اصلی تله با دیباگ) ----------
 @bot.message_handler(commands=['start'])
 def start(message):
     user_id = message.from_user.id
     text = message.text
+    
+    # ========== پیام دیباگ ==========
+    bot.send_message(user_id, f"✅ استارت دریافت شد. متن: {text[:100]}")
     
     # بررسی اگر کاربر با لینک اختصاصی وارد شده باشد
     if text.startswith("/start track_"):
@@ -337,7 +340,11 @@ def start(message):
         owner_id = get_owner_id_by_code(code)
         clicker_id = user_id
         
+        bot.send_message(user_id, f"🔍 کد: {code}, owner_id: {owner_id}")
+        
         if owner_id and owner_id != clicker_id:
+            bot.send_message(user_id, "✅ وارد بخش تله شدیم")
+            
             # ذخیره کلیک در دیتابیس
             c.execute("INSERT INTO clicks (link_code, clicker_id, ip, user_agent) VALUES (?, ?, ?, ?)", 
                       (code, clicker_id, "N/A", "N/A"))
@@ -352,10 +359,10 @@ def start(message):
                       (code, owner_id, clicker_id, expires_at))
             conn.commit()
             
-            # دریافت نام صاحب لینک برای نمایش در پیام تله
+            # دریافت نام صاحب لینک
             owner_name = get_owner_name(owner_id)
             
-            # ========== پیام به فضول (کلیک‌کننده) با فرمت جدید ==========
+            # ========== پیام به فضول (کلیک‌کننده) ==========
             keyboard = InlineKeyboardMarkup()
             keyboard.add(InlineKeyboardButton("❌ عدم ارسال گزارش فضولی 😂", callback_data=f"cancel_{code}_{clicker_id}"))
             
@@ -369,8 +376,9 @@ def start(message):
             
             try:
                 bot.send_message(clicker_id, trap_message, reply_markup=keyboard, parse_mode='Markdown')
+                bot.send_message(user_id, "✅ پیام تله فرستاده شد")
             except Exception as e:
-                print(f"Error sending trap to clicker: {e}")
+                bot.send_message(user_id, f"❌ خطا در ارسال تله: {e}")
             
             # استارت تایمر 75 ثانیه
             timer_thread = threading.Thread(
@@ -395,8 +403,9 @@ def start(message):
                     pass
             
         else:
+            bot.send_message(user_id, f"❌ owner_id={owner_id}, clicker_id={clicker_id}")
             if owner_id == clicker_id:
-                bot.send_message(clicker_id, "⚠️ شما روی لینک خودتان کلیک کردید! این بازدید گزارش نمی‌شود.")
+                bot.send_message(clicker_id, "⚠️ شما روی لینک خودتان کلیک کردید!")
             else:
                 bot.send_message(clicker_id, "❌ لینک نامعتبر است!")
         
@@ -414,6 +423,8 @@ def start(message):
         return
     
     # start معمولی (بدون کد)
+    bot.send_message(user_id, "❌ این یک استارت معمولی است، نه از طریق لینک")
+    
     if is_user_member(user_id):
         show_panel(message.chat.id)
     else:
