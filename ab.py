@@ -13,8 +13,8 @@ TOKEN = "8981742192:AAHC8z6u6GifXgMIafvzv0tn_Q2LV1mM2bQ"
 BOT_USERNAME = "nevergivup_bot"
 BASE_URL = "https://barcelona-l5tu.onrender.com"
 
-# زرین‌پال
-ZP_MERCHANT_ID = "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"  # 🔁 این رو از زرین‌پال بگیر
+# زرین‌پال (برای خرید اشتراک، در صورت نیاز)
+ZP_MERCHANT_ID = "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"  # بعداً جایگزین کن
 ZP_REQUEST_URL = "https://api.zarinpal.com/pg/v4/payment/request.json"
 ZP_VERIFY_URL = "https://api.zarinpal.com/pg/v4/payment/verify.json"
 ZP_START_PAY = "https://www.zarinpal.com/pg/StartPay/"
@@ -53,7 +53,6 @@ c.execute("""CREATE TABLE IF NOT EXISTS pending_payments (
     created_at DATETIME
 )""")
 
-# جدول برای پرداخت‌های لغو گزارش
 c.execute("""CREATE TABLE IF NOT EXISTS cancel_payments (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     report_id INTEGER,
@@ -66,7 +65,7 @@ c.execute("""CREATE TABLE IF NOT EXISTS cancel_payments (
 
 conn.commit()
 
-# ---------- توابع اشتراک ----------
+# ---------- توابع اشتراک (بدون تغییر) ----------
 def has_active_subscription(user_id):
     c.execute("SELECT expires_at FROM subscriptions WHERE user_id = ?", (user_id,))
     row = c.fetchone()
@@ -105,7 +104,7 @@ def get_subscription_info(user_id):
         return expires_at
     return None
 
-# ---------- توابع پرداخت اشتراک ----------
+# ---------- توابع پرداخت اشتراک (بدون تغییر) ----------
 def create_payment_link(user_id, amount, days):
     authority = str(uuid.uuid4()).replace("-", "")[:20]
     callback_url = f"{BASE_URL}/verify?user_id={user_id}&days={days}"
@@ -124,11 +123,9 @@ def create_payment_link(user_id, amount, days):
         
         if result.get("data", {}).get("code") == 100:
             authority = result["data"]["authority"]
-            
             c.execute("INSERT INTO pending_payments (user_id, authority, amount, days, created_at) VALUES (?, ?, ?, ?, ?)",
                       (user_id, authority, amount, days, datetime.now().isoformat()))
             conn.commit()
-            
             pay_link = f"{ZP_START_PAY}{authority}"
             return pay_link, None
         else:
@@ -142,48 +139,15 @@ def verify_payment(authority, amount):
         "amount": amount,
         "authority": authority
     }
-    
     try:
         response = requests.post(ZP_VERIFY_URL, json=data)
         result = response.json()
-        
         if result.get("data", {}).get("code") == 100:
             return True, result["data"]["ref_id"]
         else:
             return False, result.get("errors", {}).get("code", "خطا")
     except Exception as e:
         return False, str(e)
-
-# ---------- توابع پرداخت لغو گزارش ----------
-def create_cancel_payment_link(user_id, report_id, amount=65000):
-    authority = str(uuid.uuid4()).replace("-", "")[:20]
-    callback_url = f"{BASE_URL}/verify_cancel?user_id={user_id}&report_id={report_id}"
-    
-    data = {
-        "merchant_id": ZP_MERCHANT_ID,
-        "amount": amount,
-        "callback_url": callback_url,
-        "description": f"لغو ارسال گزارش فضولی - ربات تله",
-        "metadata": {"mobile": "", "email": ""}
-    }
-    
-    try:
-        response = requests.post(ZP_REQUEST_URL, json=data)
-        result = response.json()
-        
-        if result.get("data", {}).get("code") == 100:
-            authority = result["data"]["authority"]
-            
-            c.execute("INSERT INTO cancel_payments (report_id, user_id, authority, amount, created_at) VALUES (?, ?, ?, ?, ?)",
-                      (report_id, user_id, authority, amount, datetime.now().isoformat()))
-            conn.commit()
-            
-            pay_link = f"{ZP_START_PAY}{authority}"
-            return pay_link, None
-        else:
-            return None, "خطا در اتصال به درگاه پرداخت"
-    except Exception as e:
-        return None, str(e)
 
 # ---------- توابع اصلی ----------
 def generate_link(telegram_id):
@@ -218,30 +182,22 @@ def get_clicker_name(clicker_id):
 
 def delete_message_later(chat_id, message_id, delay, clicker_id, owner_name, report_id):
     time.sleep(delay)
-    
-    # بررسی پرداخت لغو
     c.execute("SELECT status FROM cancel_payments WHERE report_id = ? AND status = 'paid'", (report_id,))
     paid = c.fetchone()
     if paid:
-        return  # قبلاً با پرداخت لغو شده
-    
-    # حذف پیام تله
+        return
     try:
         bot.delete_message(chat_id, message_id)
     except:
         pass
-    
-    # بررسی اگر هنوز لغو نشده (بدون پرداخت) -> گزارش فرستاده شود
     c.execute("SELECT cancelled FROM pending_reports WHERE id = ?", (report_id,))
     result = c.fetchone()
     if result and result[0] == False:
-        # ارسال گزارش به صاحب لینک (با ۴ دکمه)
         c.execute("SELECT owner_id, clicker_id FROM pending_reports WHERE id = ?", (report_id,))
         row = c.fetchone()
         if row:
             owner_id, clicker_id = row
             clicker_name = get_clicker_name(clicker_id)
-            
             keyboard = InlineKeyboardMarkup(row_width=2)
             keyboard.add(
                 InlineKeyboardButton("💬 پیام ناشناس", callback_data=f"anon_{clicker_id}_{owner_id}"),
@@ -249,14 +205,11 @@ def delete_message_later(chat_id, message_id, delay, clicker_id, owner_name, rep
                 InlineKeyboardButton("📨 پیوی", callback_data=f"pv_{clicker_id}_{owner_id}"),
                 InlineKeyboardButton("🖼 عکس پروفایل", callback_data=f"photo_{clicker_id}_{owner_id}")
             )
-            
             report_msg = f"🎯 **یک فضول در تله افتاد!**\n\n👤 نام: {clicker_name}\n⏰ زمان: {datetime.now().strftime('%H:%M:%S')}"
             try:
                 bot.send_message(owner_id, report_msg, parse_mode='Markdown', reply_markup=keyboard)
             except:
                 pass
-        
-        # پیام اتمام زمان به فضول
         final_message = f"⏰ **زمان شما تمام شد!**\n\nگزارش فضولی شما به {owner_name} ارسال گردید.\n\nآگه توام میخوای مجبقییه رو بگیری، از پنل زیر پیام..."
         try:
             bot.send_message(clicker_id, final_message, parse_mode='Markdown')
@@ -268,37 +221,26 @@ def delete_message_later(chat_id, message_id, delay, clicker_id, owner_name, rep
 def start(message):
     user_id = message.from_user.id
     text = message.text
-    
     if text.startswith("/start track_"):
         code = text.split("track_")[1]
         owner_id = get_owner_id_by_code(code)
         clicker_id = user_id
-        
         if owner_id and owner_id != clicker_id:
             owner_name = get_owner_name(owner_id)
-            
-            # دکمه مطابق عکس اول: "❌ عدم ارسال گزارش فضولی"
             keyboard = InlineKeyboardMarkup()
             keyboard.add(InlineKeyboardButton("❌ عدم ارسال گزارش فضولی", callback_data=f"cancel_{code}_{clicker_id}"))
-            
-            # متن دقیقاً مثل عکس اول
             trap_message = (
                 f"⚠️ **نباید این فضولی رو میکردی!**\n\n"
                 f"الان این فضولیت برای {owner_name} ارسال شد، بهتره قبل از اینکه بیاد ببینه، "
                 f"خودت بهش بگی داشتی فضولی میکردی 😊\n\n"
                 f"برای عدم ارسال دکمه زیر را فشار دهید (فرصت شما 1 دقیقه و 15 ثانیه)"
             )
-            
             msg = bot.send_message(clicker_id, trap_message, reply_markup=keyboard, parse_mode='Markdown')
-            
-            # ذخیره در pending_reports
             c.execute("INSERT INTO pending_reports (link_code, owner_id, clicker_id, message_id, expires_at) VALUES (?, ?, ?, ?, ?)",
                       (code, owner_id, clicker_id, msg.message_id, datetime.now() + timedelta(seconds=75)))
             conn.commit()
             report_id = c.lastrowid
-            
             threading.Thread(target=delete_message_later, args=(clicker_id, msg.message_id, 75, clicker_id, owner_name, report_id)).start()
-            
         elif owner_id == clicker_id:
             bot.send_message(clicker_id, "⚠️ این لینک مال خودته!")
         else:
@@ -306,14 +248,13 @@ def start(message):
     else:
         bot.send_message(user_id, "👋 به ربات خوش آمدی.\nبرای دریافت لینک /link رو بفرست.\nبرای خرید اشتراک: /buy")
 
-# ---------- دریافت لینک ----------
 @bot.message_handler(commands=['link'])
 def get_link(message):
     user_id = message.from_user.id
     link = generate_link(user_id)
     bot.send_message(user_id, f"🔗 لینک اختصاصی تو:\n`{link}`\n\nاین لینک رو تو بیوگرافیت بذار.", parse_mode='Markdown')
 
-# ========== دکمه "❌ عدم ارسال گزارش فضولی" -> نمایش صفحه پرداخت ==========
+# ========== دکمه "❌ عدم ارسال گزارش فضولی" -> نمایش فوری صفحه درخواست پول (بدون تاخیر) ==========
 @bot.callback_query_handler(func=lambda call: call.data.startswith("cancel_"))
 def cancel_report_payment_page(call):
     _, code, clicker_id = call.data.split("_")
@@ -323,7 +264,6 @@ def cancel_report_payment_page(call):
         bot.answer_callback_query(call.id, "این دکمه مال تو نیست!", show_alert=True)
         return
     
-    # پیدا کردن report_id
     c.execute("SELECT id FROM pending_reports WHERE link_code = ? AND clicker_id = ? AND cancelled = FALSE ORDER BY id DESC LIMIT 1", 
               (code, clicker_id))
     row = c.fetchone()
@@ -332,29 +272,18 @@ def cancel_report_payment_page(call):
         return
     report_id = row[0]
     
-    # حذف پیام قبلی تله
+    # حذف پیام قبلی
     try:
         bot.delete_message(call.message.chat.id, call.message.message_id)
     except:
         pass
     
-    # تلاش برای ساخت لینک پرداخت واقعی
-    pay_link, error = create_cancel_payment_link(clicker_id, report_id, 65000)
-    
-    # اگر مرچنت آیدی معتبر نیست یا لینک ساخته نشد، از لینک تستی استفاده کن
-    if not pay_link or ZP_MERCHANT_ID == "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx":
-        test_pay_link = "https://www.zarinpal.com/pg/StartPay/000000000000000000000000000000000000"
-        keyboard = InlineKeyboardMarkup(row_width=1)
-        keyboard.add(
-            InlineKeyboardButton("📄 مشاهده جزئیات", callback_data=f"details_{report_id}"),
-            InlineKeyboardButton("💳 پرداخت", url=test_pay_link)
-        )
-    else:
-        keyboard = InlineKeyboardMarkup(row_width=1)
-        keyboard.add(
-            InlineKeyboardButton("📄 مشاهده جزئیات", callback_data=f"details_{report_id}"),
-            InlineKeyboardButton("💳 پرداخت", url=pay_link)
-        )
+    # صفحه پرداخت ساده و فوری (بدون درخواست به زرین‌پال)
+    keyboard = InlineKeyboardMarkup(row_width=1)
+    keyboard.add(
+        InlineKeyboardButton("📄 مشاهده جزئیات", callback_data=f"details_{report_id}"),
+        InlineKeyboardButton("💳 پرداخت", callback_data=f"fake_pay_{report_id}")
+    )
     
     payment_text = (
         f"💳 **درخواست پول**\n\n"
@@ -364,10 +293,28 @@ def cancel_report_payment_page(call):
         f"مبلغ: ۶۵,۰۰۰ ریال"
     )
     
+    bot.send_message(call.message.chat.id, payment_text, reply_markup=keyboard, parse_mode='Markdown')
+
+# ========== دکمه پرداخت تستی (لغو گزارش بدون پرداخت واقعی) ==========
+@bot.callback_query_handler(func=lambda call: call.data.startswith("fake_pay_"))
+def fake_payment(call):
+    _, report_id = call.data.split("_")
+    report_id = int(report_id)
+    
+    c.execute("UPDATE pending_reports SET cancelled = TRUE WHERE id = ?", (report_id,))
+    conn.commit()
+    
+    bot.answer_callback_query(call.id, "✅ پرداخت با موفقیت انجام شد!")
+    try:
+        bot.delete_message(call.message.chat.id, call.message.message_id)
+    except:
+        pass
+    
     bot.send_message(
         call.message.chat.id,
-        payment_text,
-        reply_markup=keyboard,
+        "✅ **پرداخت شما با موفقیت تایید شد!**\n\n"
+        "گزارش فضولی شما لغو گردید و برای صاحب لینک ارسال نخواهد شد.\n\n"
+        "🙏 از شما متشکریم.",
         parse_mode='Markdown'
     )
 
@@ -385,7 +332,7 @@ def show_details(call):
     )
     bot.send_message(call.message.chat.id, details_msg, parse_mode='Markdown')
 
-# ========== وب‌هوک تایید پرداخت لغو گزارش ==========
+# ========== وب‌هوک تایید پرداخت لغو گزارش (برای زمانی که زرین‌پال فعال شود) ==========
 @app.route('/verify_cancel', methods=['GET'])
 def verify_cancel_payment():
     user_id = request.args.get('user_id')
@@ -395,48 +342,29 @@ def verify_cancel_payment():
     
     if not user_id or not report_id or not authority:
         return "پارامترهای ناقص", 400
-    
     user_id = int(user_id)
     report_id = int(report_id)
-    
     if status != "OK":
         return "پرداخت ناموفق یا توسط کاربر لغو شده است", 400
-    
     c.execute("SELECT amount FROM cancel_payments WHERE authority = ? AND user_id = ? AND report_id = ?", 
               (authority, user_id, report_id))
     row = c.fetchone()
     if not row:
         return "تراکنش یافت نشد", 404
-    
     amount = row[0]
-    
-    data = {
-        "merchant_id": ZP_MERCHANT_ID,
-        "amount": amount,
-        "authority": authority
-    }
-    
+    data = {"merchant_id": ZP_MERCHANT_ID, "amount": amount, "authority": authority}
     try:
         response = requests.post(ZP_VERIFY_URL, json=data)
         result = response.json()
-        
         if result.get("data", {}).get("code") == 100:
             c.execute("UPDATE cancel_payments SET status = 'paid' WHERE authority = ?", (authority,))
             c.execute("UPDATE pending_reports SET cancelled = TRUE WHERE id = ?", (report_id,))
             conn.commit()
-            
             try:
-                bot.send_message(
-                    user_id,
-                    f"✅ **پرداخت شما با موفقیت تایید شد!**\n\n"
-                    f"گزارش فضولی شما لغو گردید و برای صاحب لینک ارسال نخواهد شد.\n\n"
-                    f"🙏 از شما متشکریم.",
-                    parse_mode='Markdown'
-                )
+                bot.send_message(user_id, "✅ **پرداخت شما با موفقیت تایید شد!**\n\nگزارش فضولی شما لغو گردید.", parse_mode='Markdown')
             except:
                 pass
-            
-            return f"✅ پرداخت موفق. گزارش لغو شد. کد رهگیری: {result['data']['ref_id']}", 200
+            return f"✅ پرداخت موفق. کد رهگیری: {result['data']['ref_id']}", 200
         else:
             return f"❌ پرداخت تایید نشد. کد خطا: {result.get('errors', {}).get('code', 'unknown')}", 400
     except Exception as e:
@@ -521,20 +449,17 @@ def show_photo(call):
 def buy_subscription(message):
     user_id = message.from_user.id
     info = get_subscription_info(user_id)
-    
     keyboard = InlineKeyboardMarkup(row_width=1)
     keyboard.add(
         InlineKeyboardButton("💰 اشتراک ۱ ماهه - ۱۰,۰۰۰ تومان", callback_data="pay_30_10000"),
         InlineKeyboardButton("💰 اشتراک ۳ ماهه - ۲۵,۰۰۰ تومان", callback_data="pay_90_25000"),
         InlineKeyboardButton("💰 اشتراک ۶ ماهه - ۴۵,۰۰۰ تومان", callback_data="pay_180_45000")
     )
-    
     if info:
         days_left = (info - datetime.now()).days
         status = f"✅ اشتراک فعال تا {info.strftime('%Y/%m/%d')} ({days_left} روز باقی مونده)"
     else:
         status = "❌ اشتراک فعالی ندارید"
-    
     bot.send_message(
         user_id,
         f"💳 **خرید اشتراک**\n\n{status}\n\n"
@@ -550,15 +475,12 @@ def handle_payment(call):
     days = int(days)
     amount = int(amount)
     user_id = call.from_user.id
-    
     bot.answer_callback_query(call.id, "در حال ساخت لینک پرداخت...")
-    
     pay_link, error = create_payment_link(user_id, amount, days)
     if pay_link:
         keyboard = InlineKeyboardMarkup()
         keyboard.add(InlineKeyboardButton("💳 پرداخت آنلاین", url=pay_link))
         keyboard.add(InlineKeyboardButton("🔄 بررسی وضعیت", callback_data=f"check_pay_{days}_{amount}"))
-        
         bot.send_message(
             user_id,
             f"✅ لینک پرداخت ساخته شد.\n\n"
@@ -577,49 +499,32 @@ def check_payment_status(call):
     bot.answer_callback_query(call.id, "وضعیت پرداخت بررسی شد")
     buy_subscription(call.message)
 
-# ========== وب‌هوک تایید پرداخت اشتراک ==========
 @app.route('/verify', methods=['GET'])
 def verify_payment_route():
     user_id = request.args.get('user_id')
     days = request.args.get('days')
     authority = request.args.get('Authority')
     status = request.args.get('Status')
-    
     if not user_id or not days or not authority:
         return "پارامترهای ناقص", 400
-    
     user_id = int(user_id)
     days = int(days)
-    
     if status != "OK":
         return "پرداخت ناموفق یا توسط کاربر لغو شده است", 400
-    
     c.execute("SELECT amount FROM pending_payments WHERE authority = ? AND user_id = ?", (authority, user_id))
     row = c.fetchone()
     if not row:
         return "تراکنش یافت نشد", 404
-    
     amount = row[0]
-    
     success, ref_id = verify_payment(authority, amount)
-    
     if success:
         new_expires = add_subscription(user_id, days)
         c.execute("DELETE FROM pending_payments WHERE authority = ?", (authority,))
         conn.commit()
-        
         try:
-            bot.send_message(
-                user_id,
-                f"✅ **پرداخت شما با موفقیت تایید شد!**\n\n"
-                f"🎉 اشتراک {days} روزه شما فعال شد.\n"
-                f"📅 اعتبار تا {new_expires.strftime('%Y/%m/%d')}\n\n"
-                f"حالا می‌تونی از همه دکمه‌ها استفاده کنی.",
-                parse_mode='Markdown'
-            )
+            bot.send_message(user_id, f"✅ **پرداخت شما با موفقیت تایید شد!**\n\n🎉 اشتراک {days} روزه شما فعال شد.\n📅 اعتبار تا {new_expires.strftime('%Y/%m/%d')}", parse_mode='Markdown')
         except:
             pass
-        
         return f"پرداخت با موفقیت تایید شد. کد رهگیری: {ref_id}", 200
     else:
         return f"پرداخت تایید نشد. کد خطا: {ref_id}", 400
