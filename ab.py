@@ -314,7 +314,6 @@ def get_link(message):
     bot.send_message(user_id, f"🔗 لینک اختصاصی تو:\n`{link}`\n\nاین لینک رو تو بیوگرافیت بذار.", parse_mode='Markdown')
 
 # ========== دکمه "❌ عدم ارسال گزارش فضولی" -> نمایش صفحه پرداخت ==========
-# ========== دکمه "❌ عدم ارسال گزارش فضولی" -> نمایش صفحه پرداخت ==========
 @bot.callback_query_handler(func=lambda call: call.data.startswith("cancel_"))
 def cancel_report_payment_page(call):
     _, code, clicker_id = call.data.split("_")
@@ -344,8 +343,6 @@ def cancel_report_payment_page(call):
     
     # اگر مرچنت آیدی معتبر نیست یا لینک ساخته نشد، از لینک تستی استفاده کن
     if not pay_link or ZP_MERCHANT_ID == "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx":
-        # لینک تست زرین‌پال (صفحه پرداخت آزمایشی - بدون نیاز به مرچنت)
-        # این لینک کاربر رو به سایت زرین‌پال می‌بره ولی تراکنش واقعی نیست
         test_pay_link = "https://www.zarinpal.com/pg/StartPay/000000000000000000000000000000000000"
         keyboard = InlineKeyboardMarkup(row_width=1)
         keyboard.add(
@@ -373,8 +370,6 @@ def cancel_report_payment_page(call):
         reply_markup=keyboard,
         parse_mode='Markdown'
     )
-    else:
-        bot.send_message(call.message.chat.id, f"❌ خطا در اتصال به درگاه پرداخت. لطفاً چند دقیقه بعد تلاش کن.\nخطا: {error}")
 
 # ========== دکمه مشاهده جزئیات ==========
 @bot.callback_query_handler(func=lambda call: call.data.startswith("details_"))
