@@ -83,13 +83,23 @@ def send_report_after_delay(link_code, owner_id, clicker_id, delay=75):
     
     if not result or result[0] == False:
         clicker_name = get_clicker_name(clicker_id)
+        
+        # ساخت کیبورد با 4 دکمه
+        keyboard = InlineKeyboardMarkup(row_width=2)
+        keyboard.add(
+            InlineKeyboardButton("💬 پیام ناشناس", callback_data=f"anon_{clicker_id}_{owner_id}"),
+            InlineKeyboardButton("📝 بیوگرافی", callback_data=f"bio_{clicker_id}_{owner_id}"),
+            InlineKeyboardButton("📨 پیوی", callback_data=f"pv_{clicker_id}_{owner_id}"),
+            InlineKeyboardButton("🖼 عکس پروفایل", callback_data=f"photo_{clicker_id}_{owner_id}")
+        )
+        
         report_msg = f"🎯 **یک فضول در تله افتاد!**\n\n👤 نام: {clicker_name}\n⏰ زمان: {datetime.now().strftime('%H:%M:%S')}"
         try:
-            bot.send_message(owner_id, report_msg, parse_mode='Markdown')
+            bot.send_message(owner_id, report_msg, parse_mode='Markdown', reply_markup=keyboard)
         except:
             pass
 
-# ---------- هندلر استارت (بدون پیام تست) ----------
+# ---------- هندلر استارت ----------
 @bot.message_handler(commands=['start'])
 def start(message):
     user_id = message.from_user.id
@@ -114,7 +124,6 @@ def start(message):
                 f"❌ عدم ارسال گزارش فضولی"
             )
             
-            # فرستادن مستقیم پیام تله - بدون هیچ پیام اضافی
             msg = bot.send_message(clicker_id, trap_message, reply_markup=keyboard, parse_mode='Markdown')
             
             c.execute("INSERT INTO pending_reports (link_code, owner_id, clicker_id, message_id, expires_at) VALUES (?, ?, ?, ?, ?)",
@@ -129,7 +138,6 @@ def start(message):
         else:
             bot.send_message(clicker_id, "❌ لینک نامعتبر!")
     else:
-        # start ساده - فقط یک پیام خوش‌آمدگویی ساده
         bot.send_message(user_id, "👋 به ربات خوش آمدی.\nبرای دریافت لینک /link رو بفرست.")
 
 # ---------- دریافت لینک ----------
@@ -163,6 +171,70 @@ def cancel_report(call):
         parse_mode='Markdown'
     )
     bot.answer_callback_query(call.id, "گزارش کنسل شد!")
+
+# ================== ۴ دکمه جدید ==================
+
+# 1. پیام ناشناس
+@bot.callback_query_handler(func=lambda call: call.data.startswith("anon_"))
+def anonymous_message(call):
+    _, clicker_id, owner_id = call.data.split("_")
+    bot.answer_callback_query(call.id, "در حال ارسال پیام ناشناس...")
+    # می‌تونی اینجا یه بات واسطه یا روش دیگه وصل کنی
+    bot.send_message(
+        call.message.chat.id,
+        "🔧 قابلیت پیام ناشناس به زودی اضافه می‌شه.\nفعلاً می‌تونی از گزینه «پیوی» استفاده کنی."
+    )
+
+# 2. نمایش بیوگرافی
+@bot.callback_query_handler(func=lambda call: call.data.startswith("bio_"))
+def show_bio(call):
+    _, clicker_id, owner_id = call.data.split("_")
+    bot.answer_callback_query(call.id)
+    try:
+        chat = bot.get_chat(int(clicker_id))
+        bio = getattr(chat, 'bio', None)
+        if bio:
+            bot.send_message(call.message.chat.id, f"📝 **بیوگرافی کاربر:**\n\n{bio}", parse_mode='Markdown')
+        else:
+            bot.send_message(call.message.chat.id, "❌ این کاربر بیوگرافی تنظیم نکرده است.")
+    except Exception as e:
+        bot.send_message(call.message.chat.id, "❌ امکان نمایش بیوگرافی وجود ندارد.")
+
+# 3. لینک پیوی
+@bot.callback_query_handler(func=lambda call: call.data.startswith("pv_"))
+def send_pv(call):
+    _, clicker_id, owner_id = call.data.split("_")
+    bot.answer_callback_query(call.id)
+    # تلاش برای یافتن یوزرنیم کاربر
+    try:
+        chat = bot.get_chat(int(clicker_id))
+        username = chat.username
+        if username:
+            link = f"https://t.me/{username}"
+        else:
+            link = f"https://t.me/{clicker_id}"  # لینک با آیدی عددی (فقط برای موبایل)
+        bot.send_message(
+            call.message.chat.id,
+            f"🔗 برای ارسال پیام مستقیم به این کاربر، روی لینک زیر کلیک کن:\n\n`{link}`",
+            parse_mode='Markdown'
+        )
+    except:
+        bot.send_message(call.message.chat.id, "❌ امکان ساخت لینک پیوی وجود ندارد.")
+
+# 4. نمایش عکس پروفایل
+@bot.callback_query_handler(func=lambda call: call.data.startswith("photo_"))
+def show_photo(call):
+    _, clicker_id, owner_id = call.data.split("_")
+    bot.answer_callback_query(call.id)
+    try:
+        photos = bot.get_user_profile_photos(int(clicker_id), limit=1)
+        if photos.total_count > 0:
+            file_id = photos.photos[0][-1].file_id
+            bot.send_photo(call.message.chat.id, file_id, caption=f"🖼 عکس پروفایل کاربر")
+        else:
+            bot.send_message(call.message.chat.id, "❌ این کاربر عکس پروفایل ندارد.")
+    except:
+        bot.send_message(call.message.chat.id, "❌ امکان نمایش عکس پروفایل وجود ندارد.")
 
 # ---------- مسیرهای Flask ----------
 @app.route('/webhook', methods=['POST'])
