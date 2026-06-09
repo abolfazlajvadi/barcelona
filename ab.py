@@ -13,6 +13,9 @@ TOKEN = "8981742192:AAHC8z6u6GifXgMIafvzv0tn_Q2LV1mM2bQ"
 BOT_USERNAME = "nevergivup_bot"
 BASE_URL = "https://barcelona-l5tu.onrender.com"
 
+# ---------- کانال الزامی ----------
+REQUIRED_CHANNEL = "@film01385"  # 🔁 نام کاربری کانال خود را وارد کنید (مثل @mychannel)
+
 # زرین‌پال
 ZP_MERCHANT_ID = "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
 ZP_REQUEST_URL = "https://api.zarinpal.com/pg/v4/payment/request.json"
@@ -63,7 +66,6 @@ c.execute("""CREATE TABLE IF NOT EXISTS cancel_payments (
     created_at DATETIME
 )""")
 
-# جداول برای ذخیره عکس و متن کاربر (برای تنظیمات)
 c.execute("""CREATE TABLE IF NOT EXISTS user_photos (
     user_id INTEGER PRIMARY KEY,
     photo_id TEXT
@@ -76,18 +78,46 @@ c.execute("""CREATE TABLE IF NOT EXISTS user_texts (
 
 conn.commit()
 
+# ========== بررسی عضویت در کانال ==========
+def check_membership(user_id):
+    """بررسی می‌کند کاربر عضو کانال الزامی است یا خیر"""
+    try:
+        member = bot.get_chat_member(REQUIRED_CHANNEL, user_id)
+        if member.status in ['member', 'administrator', 'creator']:
+            return True
+        return False
+    except Exception as e:
+        print(f"Error checking membership: {e}")
+        return False
+
+def require_channel(user_id):
+    """اگر کاربر عضو نبود، پیام عضویت می‌فرستد و False برمی‌گرداند، در غیر این صورت True"""
+    if check_membership(user_id):
+        return True
+    else:
+        keyboard = InlineKeyboardMarkup()
+        keyboard.add(InlineKeyboardButton("📢 عضویت در کانال", url=f"https://t.me/{REQUIRED_CHANNEL.replace('@', '')}"))
+        keyboard.add(InlineKeyboardButton("✅ بررسی عضویت", callback_data="check_membership"))
+        bot.send_message(
+            user_id,
+            f"❌ **دسترسی محدود شده**\n\n"
+            f"برای استفاده از امکانات ربات، ابتدا باید در کانال زیر عضو شوید:\n\n"
+            f"🔗 {REQUIRED_CHANNEL}\n\n"
+            f"پس از عضویت، روی دکمه «بررسی عضویت» کلیک کنید.",
+            reply_markup=keyboard,
+            parse_mode='Markdown'
+        )
+        return False
+
 # ========== پنل اصلی با Reply Keyboard Markup ==========
 def main_panel(user_id, message_id=None):
     """نمایش پنل کاربری با دکمه‌های شناور"""
-    
     keyboard = ReplyKeyboardMarkup(row_width=2, resize_keyboard=True, one_time_keyboard=False)
-    
     btn_buy_subscription = KeyboardButton("💰 خرید اشتراک پرو")
     btn_buy_apple = KeyboardButton("🍎 خرید سیر")
     btn_set_photo = KeyboardButton("🖼 تنظیم عکس مچ گیری")
     btn_set_text = KeyboardButton("📝 تنظیم متن مچ گیری")
     btn_help = KeyboardButton("❓ راهنما")
-    
     keyboard.add(btn_buy_subscription, btn_buy_apple)
     keyboard.add(btn_set_photo, btn_set_text)
     keyboard.add(btn_help)
@@ -253,7 +283,6 @@ def delete_message_later(chat_id, message_id, delay, clicker_id, owner_name, rep
             except:
                 pass
             
-            # ========== نمایش پنل برای فضول ==========
             final_message = (
                 f"⏰ **زمان شما تمام شد!**\n\n"
                 f"گزارش فضولی شما به {owner_name} ارسال گردید.\n\n"
@@ -261,7 +290,7 @@ def delete_message_later(chat_id, message_id, delay, clicker_id, owner_name, rep
             )
             try:
                 bot.send_message(clicker_id, final_message, parse_mode='Markdown')
-                main_panel(clicker_id)  # نمایش پنل شناور
+                main_panel(clicker_id)
             except:
                 pass
 
@@ -292,28 +321,30 @@ def start(message):
             threading.Thread(target=delete_message_later, args=(clicker_id, msg.message_id, 75, clicker_id, owner_name, report_id)).start()
         elif owner_id == clicker_id:
             bot.send_message(clicker_id, "⚠️ این لینک مال خودته!")
-            main_panel(clicker_id)  # نمایش پنل
+            main_panel(clicker_id)
         else:
             bot.send_message(clicker_id, "❌ لینک نامعتبر!")
-            main_panel(clicker_id)  # نمایش پنل
+            main_panel(clicker_id)
     else:
-        main_panel(user_id)  # نمایش پنل برای استارت ساده
+        main_panel(user_id)
 
 @bot.message_handler(commands=['link'])
 def get_link(message):
     user_id = message.from_user.id
+    if not require_channel(user_id):
+        return
     link = generate_link(user_id)
-    # برای اینکه کیبورد شناور مزاحمت نشود، یک پیام ساده با دکمه بازگشت
     keyboard = InlineKeyboardMarkup()
     keyboard.add(InlineKeyboardButton("🔙 بازگشت به پنل", callback_data="back_to_panel"))
     bot.send_message(user_id, f"🔗 لینک اختصاصی تو:\n`{link}`\n\nاین لینک رو تو بیوگرافیت بذار.", reply_markup=keyboard, parse_mode='Markdown')
 
-# ========== هندلرهای دکمه‌های شناور ==========
+# ========== هندلرهای دکمه‌های شناور (با بررسی عضویت) ==========
 @bot.message_handler(func=lambda message: message.text == "💰 خرید اشتراک پرو")
 def handle_buy_subscription(message):
     user_id = message.from_user.id
+    if not require_channel(user_id):
+        return
     info = get_subscription_info(user_id)
-    
     keyboard = InlineKeyboardMarkup(row_width=1)
     keyboard.add(
         InlineKeyboardButton("💰 اشتراک ۱ ماهه - ۱۰,۰۰۰ تومان", callback_data="pay_30_10000"),
@@ -321,13 +352,11 @@ def handle_buy_subscription(message):
         InlineKeyboardButton("💰 اشتراک ۶ ماهه - ۴۵,۰۰۰ تومان", callback_data="pay_180_45000"),
         InlineKeyboardButton("🔙 بازگشت به پنل", callback_data="back_to_panel")
     )
-    
     if info:
         days_left = (info - datetime.now()).days
         status = f"✅ اشتراک فعال تا {info.strftime('%Y/%m/%d')} ({days_left} روز باقی مونده)"
     else:
         status = "❌ اشتراک فعالی ندارید"
-    
     bot.send_message(
         user_id,
         f"💳 **خرید اشتراک**\n\n{status}\n\n"
@@ -339,6 +368,8 @@ def handle_buy_subscription(message):
 @bot.message_handler(func=lambda message: message.text == "🍎 خرید سیر")
 def handle_buy_apple(message):
     user_id = message.from_user.id
+    if not require_channel(user_id):
+        return
     hide_keyboard = ReplyKeyboardRemove()
     bot.send_message(
         user_id,
@@ -351,6 +382,8 @@ def handle_buy_apple(message):
 @bot.message_handler(func=lambda message: message.text == "🖼 تنظیم عکس مچ گیری")
 def handle_set_photo(message):
     user_id = message.from_user.id
+    if not require_channel(user_id):
+        return
     hide_keyboard = ReplyKeyboardRemove()
     bot.send_message(
         user_id,
@@ -374,6 +407,8 @@ def save_photo(message):
 @bot.message_handler(func=lambda message: message.text == "📝 تنظیم متن مچ گیری")
 def handle_set_text(message):
     user_id = message.from_user.id
+    if not require_channel(user_id):
+        return
     hide_keyboard = ReplyKeyboardRemove()
     bot.send_message(
         user_id,
@@ -394,6 +429,8 @@ def save_text(message):
 @bot.message_handler(func=lambda message: message.text == "❓ راهنما")
 def handle_help(message):
     user_id = message.from_user.id
+    if not require_channel(user_id):
+        return
     help_text = (
         f"❓ **راهنمای ربات**\n\n"
         f"🔹 **خرید اشتراک پرو**: با خرید اشتراک، به تمام قابلیت‌ها دسترسی پیدا کنید.\n"
@@ -406,18 +443,15 @@ def handle_help(message):
     keyboard.add(InlineKeyboardButton("🔙 بازگشت به پنل", callback_data="back_to_panel"))
     hide_keyboard = ReplyKeyboardRemove()
     bot.send_message(user_id, help_text, reply_markup=keyboard, parse_mode='Markdown')
-    # کیبورد شناور مخفی می‌شود و با دکمه بازگشت دوباره میاد
 
-# ========== دکمه "❌ عدم ارسال گزارش فضولی" -> نمایش فوری صفحه درخواست پول ==========
+# ========== دکمه "❌ عدم ارسال گزارش فضولی" -> صفحه درخواست پول ==========
 @bot.callback_query_handler(func=lambda call: call.data.startswith("cancel_"))
 def cancel_report_payment_page(call):
     _, code, clicker_id = call.data.split("_")
     clicker_id = int(clicker_id)
-    
     if call.from_user.id != clicker_id:
         bot.answer_callback_query(call.id, "این دکمه مال تو نیست!", show_alert=True)
         return
-    
     c.execute("SELECT id FROM pending_reports WHERE link_code = ? AND clicker_id = ? AND cancelled = FALSE ORDER BY id DESC LIMIT 1", 
               (code, clicker_id))
     row = c.fetchone()
@@ -425,18 +459,15 @@ def cancel_report_payment_page(call):
         bot.answer_callback_query(call.id, "گزارشی یافت نشد!", show_alert=True)
         return
     report_id = row[0]
-    
     try:
         bot.delete_message(call.message.chat.id, call.message.message_id)
     except:
         pass
-    
     keyboard = InlineKeyboardMarkup(row_width=1)
     keyboard.add(
         InlineKeyboardButton("📄 مشاهده جزئیات", callback_data=f"details_{report_id}"),
         InlineKeyboardButton("💳 پرداخت", callback_data=f"fake_pay_{report_id}")
     )
-    
     payment_text = (
         f"💳 **درخواست پول**\n\n"
         f"**لغو ارسال گزارش فضولی**\n"
@@ -444,23 +475,19 @@ def cancel_report_payment_page(call):
         f"لغو گزارش: 65000\n"
         f"مبلغ: ۶۵,۰۰۰ ریال"
     )
-    
     bot.send_message(call.message.chat.id, payment_text, reply_markup=keyboard, parse_mode='Markdown')
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("fake_pay_"))
 def fake_payment(call):
     _, report_id = call.data.split("_")
     report_id = int(report_id)
-    
     c.execute("UPDATE pending_reports SET cancelled = TRUE WHERE id = ?", (report_id,))
     conn.commit()
-    
     bot.answer_callback_query(call.id, "✅ پرداخت با موفقیت انجام شد!")
     try:
         bot.delete_message(call.message.chat.id, call.message.message_id)
     except:
         pass
-    
     bot.send_message(
         call.message.chat.id,
         "✅ **پرداخت شما با موفقیت تایید شد!**\n\n"
@@ -482,6 +509,20 @@ def show_details(call):
     )
     bot.send_message(call.message.chat.id, details_msg, parse_mode='Markdown')
 
+# ========== دکمه بررسی عضویت (callback) ==========
+@bot.callback_query_handler(func=lambda call: call.data == "check_membership")
+def check_membership_callback(call):
+    user_id = call.from_user.id
+    if check_membership(user_id):
+        bot.answer_callback_query(call.id, "✅ عضویت شما تأیید شد! حالا می‌توانید از ربات استفاده کنید.")
+        try:
+            bot.delete_message(call.message.chat.id, call.message.message_id)
+        except:
+            pass
+        main_panel(user_id)
+    else:
+        bot.answer_callback_query(call.id, "❌ شما هنوز عضو کانال نشده‌اید!", show_alert=True)
+
 # ========== دکمه بازگشت به پنل (Inline) ==========
 @bot.callback_query_handler(func=lambda call: call.data == "back_to_panel")
 def back_to_panel_inline(call):
@@ -499,7 +540,6 @@ def verify_cancel_payment():
     report_id = request.args.get('report_id')
     authority = request.args.get('Authority')
     status = request.args.get('Status')
-    
     if not user_id or not report_id or not authority:
         return "پارامترهای ناقص", 400
     user_id = int(user_id)
