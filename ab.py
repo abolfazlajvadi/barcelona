@@ -210,7 +210,11 @@ def delete_message_later(chat_id, message_id, delay, clicker_id, owner_name, rep
                 bot.send_message(owner_id, report_msg, parse_mode='Markdown', reply_markup=keyboard)
             except:
                 pass
-        final_message = f"⏰ **زمان شما تمام شد!**\n\nگزارش فضولی شما به {owner_name} ارسال گردید.\n\nآگه توام میخوای مجبقییه رو بگیری، از پنل زیر پیام..."
+     final_message = (
+            f"⏰ **زمان شما تمام شد!**\n\n"
+            f"گزارش فضولی شما به {owner_name} ارسال گردید.\n\n"
+            f"آگه توام میخوای مجبور به روی بگیرید، از پنل زیر پیام..."
+        )
         try:
             bot.send_message(clicker_id, final_message, parse_mode='Markdown')
         except:
