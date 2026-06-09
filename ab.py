@@ -215,7 +215,7 @@ def delete_message_later(chat_id, message_id, delay, clicker_id, owner_name, rep
             final_message = (
                 f"⏰ **زمان شما تمام شد!**\n\n"
                 f"گزارش فضولی شما به {owner_name} ارسال گردید.\n\n"
-                f"آگه توام میحوای مچ بقیه رو بگیری، از پنل زیر پیام..."
+                f"آگه توام میخوای مچ بقیه رو بگیری، از پنل زیر استفاده کن"
             )
             try:
                 bot.send_message(clicker_id, final_message, parse_mode='Markdown')
