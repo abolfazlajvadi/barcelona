@@ -113,14 +113,20 @@ def require_channel(user_id):
 def main_panel(user_id, message_id=None):
     """نمایش پنل کاربری با دکمه‌های شناور"""
     keyboard = ReplyKeyboardMarkup(row_width=2, resize_keyboard=True, one_time_keyboard=False)
+    
+    # دکمه جدید دریافت لینک من
+    btn_get_link = KeyboardButton("🔗 دریافت لینک من")
     btn_buy_subscription = KeyboardButton("💰 خرید اشتراک پرو")
     btn_buy_apple = KeyboardButton("🍎 خرید سیر")
     btn_set_photo = KeyboardButton("🖼 تنظیم عکس مچ گیری")
     btn_set_text = KeyboardButton("📝 تنظیم متن مچ گیری")
     btn_help = KeyboardButton("❓ راهنما")
-    keyboard.add(btn_buy_subscription, btn_buy_apple)
-    keyboard.add(btn_set_photo, btn_set_text)
-    keyboard.add(btn_help)
+    
+    # چیدمان دکمه‌ها
+    keyboard.add(btn_get_link)               # ردیف اول: دریافت لینک من
+    keyboard.add(btn_buy_subscription, btn_buy_apple)  # ردیف دوم
+    keyboard.add(btn_set_photo, btn_set_text)          # ردیف سوم
+    keyboard.add(btn_help)                             # ردیف چهارم
     
     panel_text = (
         f"📱 **پنل کاربری**\n\n"
@@ -328,15 +334,29 @@ def start(message):
     else:
         main_panel(user_id)
 
-@bot.message_handler(commands=['link'])
-def get_link(message):
+# ========== هندلر دکمه دریافت لینک من ==========
+@bot.message_handler(func=lambda message: message.text == "🔗 دریافت لینک من")
+def handle_get_my_link(message):
     user_id = message.from_user.id
     if not require_channel(user_id):
         return
     link = generate_link(user_id)
     keyboard = InlineKeyboardMarkup()
+    keyboard.add(InlineKeyboardButton("📋 کپی لینک", callback_data=f"copy_link_{link}"))
     keyboard.add(InlineKeyboardButton("🔙 بازگشت به پنل", callback_data="back_to_panel"))
-    bot.send_message(user_id, f"🔗 لینک اختصاصی تو:\n`{link}`\n\nاین لینک رو تو بیوگرافیت بذار.", reply_markup=keyboard, parse_mode='Markdown')
+    bot.send_message(
+        user_id,
+        f"🔗 **لینک اختصاصی شما:**\n\n`{link}`\n\n"
+        f"✅ این لینک مخصوص شماست.\n"
+        f"📌 آن را در بیوگرافی یا کانال خود قرار دهید.\n"
+        f"⚠️ هر کسی روی این لینک کلیک کند، در تله می‌افتد!",
+        reply_markup=keyboard,
+        parse_mode='Markdown'
+    )
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith("copy_link_"))
+def copy_link_callback(call):
+    bot.answer_callback_query(call.id, "✅ لینک با موفقیت کپی شد! (روی لینک نگه دارید و کپی کنید)", show_alert=True)
 
 # ========== هندلرهای دکمه‌های شناور (با بررسی عضویت) ==========
 @bot.message_handler(func=lambda message: message.text == "💰 خرید اشتراک پرو")
@@ -433,6 +453,7 @@ def handle_help(message):
         return
     help_text = (
         f"❓ **راهنمای ربات**\n\n"
+        f"🔹 **دریافت لینک من**: لینک اختصاصی خود را دریافت کنید.\n"
         f"🔹 **خرید اشتراک پرو**: با خرید اشتراک، به تمام قابلیت‌ها دسترسی پیدا کنید.\n"
         f"🔹 **خرید سیر**: خرید سیر برای مچ‌گیری.\n"
         f"🔹 **تنظیم عکس مچ گیری**: تنظیم عکس پروفایل برای مچ‌گیری.\n"
