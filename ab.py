@@ -14,7 +14,7 @@ BOT_USERNAME = "nevergivup_bot"
 BASE_URL = "https://barcelona-l5tu.onrender.com"
 
 # ---------- کانال الزامی ----------
-REQUIRED_CHANNEL = "@film01385"  # 🔁 نام کاربری کانال خود را وارد کنید (مثل @mychannel)
+REQUIRED_CHANNEL = "@film01385"
 
 # زرین‌پال
 ZP_MERCHANT_ID = "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
@@ -78,9 +78,12 @@ c.execute("""CREATE TABLE IF NOT EXISTS user_texts (
 
 conn.commit()
 
+# ---------- دیکشنری برای ذخیره موقت اطلاعات ارسال پیام ناشناس ----------
+# key: user_id (فرستنده = owner), value: clicker_id (گیرنده)
+anonymous_temp = {}
+
 # ========== بررسی عضویت در کانال ==========
 def check_membership(user_id):
-    """بررسی می‌کند کاربر عضو کانال الزامی است یا خیر"""
     try:
         member = bot.get_chat_member(REQUIRED_CHANNEL, user_id)
         if member.status in ['member', 'administrator', 'creator']:
@@ -91,7 +94,6 @@ def check_membership(user_id):
         return False
 
 def require_channel(user_id):
-    """اگر کاربر عضو نبود، پیام عضویت می‌فرستد و False برمی‌گرداند، در غیر این صورت True"""
     if check_membership(user_id):
         return True
     else:
@@ -111,29 +113,23 @@ def require_channel(user_id):
 
 # ========== پنل اصلی با Reply Keyboard Markup ==========
 def main_panel(user_id, message_id=None):
-    """نمایش پنل کاربری با دکمه‌های شناور"""
     keyboard = ReplyKeyboardMarkup(row_width=2, resize_keyboard=True, one_time_keyboard=False)
-    
-    # دکمه جدید دریافت لینک من
     btn_get_link = KeyboardButton("🔗 دریافت لینک من")
     btn_buy_subscription = KeyboardButton("💰 خرید اشتراک پرو")
     btn_buy_apple = KeyboardButton("🍎 خرید سیر")
     btn_set_photo = KeyboardButton("🖼 تنظیم عکس مچ گیری")
     btn_set_text = KeyboardButton("📝 تنظیم متن مچ گیری")
     btn_help = KeyboardButton("❓ راهنما")
-    
-    # چیدمان دکمه‌ها
-    keyboard.add(btn_get_link)               # ردیف اول: دریافت لینک من
-    keyboard.add(btn_buy_subscription, btn_buy_apple)  # ردیف دوم
-    keyboard.add(btn_set_photo, btn_set_text)          # ردیف سوم
-    keyboard.add(btn_help)                             # ردیف چهارم
+    keyboard.add(btn_get_link)
+    keyboard.add(btn_buy_subscription, btn_buy_apple)
+    keyboard.add(btn_set_photo, btn_set_text)
+    keyboard.add(btn_help)
     
     panel_text = (
         f"📱 **پنل کاربری**\n\n"
         f"👤 کاربر: {get_owner_name(user_id)}\n\n"
         f"❗️ **یک گزینه را انتخاب کنید...**"
     )
-    
     if message_id:
         try:
             bot.edit_message_text(panel_text, user_id, message_id, parse_mode='Markdown')
@@ -143,7 +139,7 @@ def main_panel(user_id, message_id=None):
     else:
         bot.send_message(user_id, panel_text, reply_markup=keyboard, parse_mode='Markdown')
 
-# ---------- توابع اشتراک ----------
+# ---------- توابع اشتراک و پرداخت (بدون تغییر) ----------
 def has_active_subscription(user_id):
     c.execute("SELECT expires_at FROM subscriptions WHERE user_id = ?", (user_id,))
     row = c.fetchone()
@@ -168,7 +164,6 @@ def add_subscription(user_id, days):
             new_expires = current + timedelta(days=days)
     else:
         new_expires = current + timedelta(days=days)
-    
     c.execute("INSERT OR REPLACE INTO subscriptions (user_id, expires_at) VALUES (?, ?)",
               (user_id, new_expires.isoformat()))
     conn.commit()
@@ -182,11 +177,9 @@ def get_subscription_info(user_id):
         return expires_at
     return None
 
-# ---------- توابع پرداخت اشتراک ----------
 def create_payment_link(user_id, amount, days):
     authority = str(uuid.uuid4()).replace("-", "")[:20]
     callback_url = f"{BASE_URL}/verify?user_id={user_id}&days={days}"
-    
     data = {
         "merchant_id": ZP_MERCHANT_ID,
         "amount": amount,
@@ -194,11 +187,9 @@ def create_payment_link(user_id, amount, days):
         "description": f"خرید اشتراک {days} روزه ربات تله",
         "metadata": {"mobile": "", "email": ""}
     }
-    
     try:
         response = requests.post(ZP_REQUEST_URL, json=data)
         result = response.json()
-        
         if result.get("data", {}).get("code") == 100:
             authority = result["data"]["authority"]
             c.execute("INSERT INTO pending_payments (user_id, authority, amount, days, created_at) VALUES (?, ?, ?, ?, ?)",
@@ -334,7 +325,7 @@ def start(message):
     else:
         main_panel(user_id)
 
-# ========== هندلر دکمه دریافت لینک من ==========
+# ---------- دریافت لینک من ----------
 @bot.message_handler(func=lambda message: message.text == "🔗 دریافت لینک من")
 def handle_get_my_link(message):
     user_id = message.from_user.id
@@ -358,7 +349,7 @@ def handle_get_my_link(message):
 def copy_link_callback(call):
     bot.answer_callback_query(call.id, "✅ لینک با موفقیت کپی شد! (روی لینک نگه دارید و کپی کنید)", show_alert=True)
 
-# ========== هندلرهای دکمه‌های شناور (با بررسی عضویت) ==========
+# ---------- دکمه‌های پنل (بدون تغییر) ----------
 @bot.message_handler(func=lambda message: message.text == "💰 خرید اشتراک پرو")
 def handle_buy_subscription(message):
     user_id = message.from_user.id
@@ -465,7 +456,93 @@ def handle_help(message):
     hide_keyboard = ReplyKeyboardRemove()
     bot.send_message(user_id, help_text, reply_markup=keyboard, parse_mode='Markdown')
 
-# ========== دکمه "❌ عدم ارسال گزارش فضولی" -> صفحه درخواست پول ==========
+# ========== پیام ناشناس رایگان (بدون نیاز به اشتراک) ==========
+@bot.callback_query_handler(func=lambda call: call.data.startswith("anon_"))
+def anonymous_message(call):
+    # استخراج clicker_id و owner_id از دیتا
+    _, clicker_id, owner_id = call.data.split("_")
+    clicker_id = int(clicker_id)
+    owner_id = int(owner_id)
+    user_id = call.from_user.id
+    
+    # فقط صاحب لینک (owner) می‌تواند پیام بفرستد
+    if user_id != owner_id:
+        bot.answer_callback_query(call.id, "این دکمه فقط برای صاحب لینک قابل استفاده است!", show_alert=True)
+        return
+    
+    # ذخیره موقت اطلاعات برای ارسال پیام
+    anonymous_temp[user_id] = clicker_id
+    
+    # حذف کیبورد اینلاین و نمایش پیام راهنما
+    try:
+        bot.edit_message_reply_markup(call.message.chat.id, call.message.message_id, reply_markup=None)
+    except:
+        pass
+    
+    cancel_keyboard = InlineKeyboardMarkup()
+    cancel_keyboard.add(InlineKeyboardButton("❌ انصراف", callback_data="cancel_anonymous"))
+    
+    bot.send_message(
+        user_id,
+        "💬 **ارسال پیام ناشناس**\n\n"
+        "لطفاً متن پیام خود را ارسال کنید.\n"
+        "این پیام **به صورت ناشناس** برای کاربر فضول فرستاده خواهد شد.\n\n"
+        "⚠️ توجه: نام و اطلاعات شما فاش نمی‌شود.",
+        reply_markup=cancel_keyboard,
+        parse_mode='Markdown'
+    )
+    # ثبت مرحله بعد برای دریافت متن
+    bot.register_next_step_handler_by_chat_id(user_id, receive_anonymous_message, clicker_id, user_id)
+    bot.answer_callback_query(call.id)
+
+def receive_anonymous_message(message, clicker_id, owner_id):
+    user_id = message.from_user.id
+    # بررسی اینکه آیا هنوز در دیکشنری هست (انصراف نداده)
+    if user_id not in anonymous_temp:
+        return
+    
+    if message.text:
+        anonymous_text = message.text
+        # ارسال پیام ناشناس برای clicker
+        try:
+            bot.send_message(
+                clicker_id,
+                f"💌 **پیام ناشناس**\n\n"
+                f"یک کاربر ناشناس به شما پیام داده است:\n\n"
+                f"「 {anonymous_text} 」\n\n"
+                f"🔹 شما نمی‌توانید پاسخ دهید.",
+                parse_mode='Markdown'
+            )
+            bot.send_message(
+                user_id,
+                "✅ **پیام شما با موفقیت ارسال شد!**\n\nپیام شما به صورت ناشناس برای کاربر فضول فرستاده شد.",
+                parse_mode='Markdown'
+            )
+        except Exception as e:
+            bot.send_message(
+                user_id,
+                f"❌ **خطا در ارسال پیام**\n\nکاربر فضول ممکن است ربات را بلاک کرده باشد یا مشکل دیگری وجود دارد.\n\nخطا: {e}",
+                parse_mode='Markdown'
+            )
+    else:
+        bot.send_message(user_id, "❌ لطفاً فقط متن ارسال کنید. پیام ناشناس ارسال نشد.", parse_mode='Markdown')
+    
+    # پاک کردن دیکشنری و بازگشت به پنل
+    anonymous_temp.pop(user_id, None)
+    main_panel(user_id)
+
+@bot.callback_query_handler(func=lambda call: call.data == "cancel_anonymous")
+def cancel_anonymous(call):
+    user_id = call.from_user.id
+    anonymous_temp.pop(user_id, None)
+    try:
+        bot.delete_message(call.message.chat.id, call.message.message_id)
+    except:
+        pass
+    bot.send_message(user_id, "❌ عملیات ارسال پیام ناشناس لغو شد.", parse_mode='Markdown')
+    main_panel(user_id)
+
+# ========== دکمه‌های دیگر (تله، پرداخت، و ...) بدون تغییر ==========
 @bot.callback_query_handler(func=lambda call: call.data.startswith("cancel_"))
 def cancel_report_payment_page(call):
     _, code, clicker_id = call.data.split("_")
@@ -530,7 +607,6 @@ def show_details(call):
     )
     bot.send_message(call.message.chat.id, details_msg, parse_mode='Markdown')
 
-# ========== دکمه بررسی عضویت (callback) ==========
 @bot.callback_query_handler(func=lambda call: call.data == "check_membership")
 def check_membership_callback(call):
     user_id = call.from_user.id
@@ -544,7 +620,6 @@ def check_membership_callback(call):
     else:
         bot.answer_callback_query(call.id, "❌ شما هنوز عضو کانال نشده‌اید!", show_alert=True)
 
-# ========== دکمه بازگشت به پنل (Inline) ==========
 @bot.callback_query_handler(func=lambda call: call.data == "back_to_panel")
 def back_to_panel_inline(call):
     try:
@@ -554,44 +629,7 @@ def back_to_panel_inline(call):
     main_panel(call.from_user.id)
     bot.answer_callback_query(call.id)
 
-# ========== وب‌هوک تایید پرداخت لغو گزارش ==========
-@app.route('/verify_cancel', methods=['GET'])
-def verify_cancel_payment():
-    user_id = request.args.get('user_id')
-    report_id = request.args.get('report_id')
-    authority = request.args.get('Authority')
-    status = request.args.get('Status')
-    if not user_id or not report_id or not authority:
-        return "پارامترهای ناقص", 400
-    user_id = int(user_id)
-    report_id = int(report_id)
-    if status != "OK":
-        return "پرداخت ناموفق یا توسط کاربر لغو شده است", 400
-    c.execute("SELECT amount FROM cancel_payments WHERE authority = ? AND user_id = ? AND report_id = ?", 
-              (authority, user_id, report_id))
-    row = c.fetchone()
-    if not row:
-        return "تراکنش یافت نشد", 404
-    amount = row[0]
-    data = {"merchant_id": ZP_MERCHANT_ID, "amount": amount, "authority": authority}
-    try:
-        response = requests.post(ZP_VERIFY_URL, json=data)
-        result = response.json()
-        if result.get("data", {}).get("code") == 100:
-            c.execute("UPDATE cancel_payments SET status = 'paid' WHERE authority = ?", (authority,))
-            c.execute("UPDATE pending_reports SET cancelled = TRUE WHERE id = ?", (report_id,))
-            conn.commit()
-            try:
-                bot.send_message(user_id, "✅ **پرداخت شما با موفقیت تایید شد!**\n\nگزارش فضولی شما لغو گردید.", parse_mode='Markdown')
-            except:
-                pass
-            return f"✅ پرداخت موفق. کد رهگیری: {result['data']['ref_id']}", 200
-        else:
-            return f"❌ پرداخت تایید نشد. کد خطا: {result.get('errors', {}).get('code', 'unknown')}", 400
-    except Exception as e:
-        return f"خطا: {e}", 500
-
-# ========== ۴ دکمه اصلی + بررسی اشتراک ==========
+# ========== ۴ دکمه دیگر (بیوگرافی، پیوی، عکس) با بررسی اشتراک (باقی می‌مانند) ==========
 def check_subscription_and_forward(call, feature_name):
     user_id = call.from_user.id
     if not has_active_subscription(user_id):
@@ -607,14 +645,6 @@ def check_subscription_and_forward(call, feature_name):
         bot.answer_callback_query(call.id, "ابتدا اشتراک بخرید!")
         return False
     return True
-
-@bot.callback_query_handler(func=lambda call: call.data.startswith("anon_"))
-def anonymous_message(call):
-    if not check_subscription_and_forward(call, "پیام ناشناس"):
-        return
-    _, clicker_id, owner_id = call.data.split("_")
-    bot.answer_callback_query(call.id, "در حال ارسال پیام ناشناس...")
-    bot.send_message(call.message.chat.id, "🔧 قابلیت پیام ناشناس به زودی اضافه می‌شه.")
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("bio_"))
 def show_bio(call):
@@ -721,6 +751,42 @@ def verify_payment_route():
         return f"پرداخت با موفقیت تایید شد. کد رهگیری: {ref_id}", 200
     else:
         return f"پرداخت تایید نشد. کد خطا: {ref_id}", 400
+
+@app.route('/verify_cancel', methods=['GET'])
+def verify_cancel_payment():
+    user_id = request.args.get('user_id')
+    report_id = request.args.get('report_id')
+    authority = request.args.get('Authority')
+    status = request.args.get('Status')
+    if not user_id or not report_id or not authority:
+        return "پارامترهای ناقص", 400
+    user_id = int(user_id)
+    report_id = int(report_id)
+    if status != "OK":
+        return "پرداخت ناموفق یا توسط کاربر لغو شده است", 400
+    c.execute("SELECT amount FROM cancel_payments WHERE authority = ? AND user_id = ? AND report_id = ?", 
+              (authority, user_id, report_id))
+    row = c.fetchone()
+    if not row:
+        return "تراکنش یافت نشد", 404
+    amount = row[0]
+    data = {"merchant_id": ZP_MERCHANT_ID, "amount": amount, "authority": authority}
+    try:
+        response = requests.post(ZP_VERIFY_URL, json=data)
+        result = response.json()
+        if result.get("data", {}).get("code") == 100:
+            c.execute("UPDATE cancel_payments SET status = 'paid' WHERE authority = ?", (authority,))
+            c.execute("UPDATE pending_reports SET cancelled = TRUE WHERE id = ?", (report_id,))
+            conn.commit()
+            try:
+                bot.send_message(user_id, "✅ **پرداخت شما با موفقیت تایید شد!**\n\nگزارش فضولی شما لغو گردید.", parse_mode='Markdown')
+            except:
+                pass
+            return f"✅ پرداخت موفق. کد رهگیری: {result['data']['ref_id']}", 200
+        else:
+            return f"❌ پرداخت تایید نشد. کد خطا: {result.get('errors', {}).get('code', 'unknown')}", 400
+    except Exception as e:
+        return f"خطا: {e}", 500
 
 # ---------- مسیرهای Flask ----------
 @app.route('/webhook', methods=['POST'])
