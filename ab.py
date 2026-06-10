@@ -436,12 +436,12 @@ def save_text(message):
     conn.commit()
     bot.send_message(user_id, f"✅ متن شما با موفقیت ذخیره شد!\n\nمتن شما:\n{text}")
     main_panel(user_id)
+
 @bot.message_handler(func=lambda message: message.text == "❓ راهنما")
 def handle_help(message):
     user_id = message.from_user.id
     if not require_channel(user_id):
         return
-    
     help_text = (
         f"📚 **راهنمای جامع استفاده از ربات**\n\n"
         f"با سلام و احترام. به بخش راهنمای ربات خوش آمدید. در این بخش با تمامی امکانات و نحوه عملکرد دقیق ربات آشنا خواهید شد:\n\n"
@@ -465,19 +465,12 @@ def handle_help(message):
         f"داشتن اشتراک سپر، امنیت و سرعت شما را به حداکثر می‌رساند:\n"
         f"🔹 **محافظت از شما:** اگر خودتان روی لینک شخص دیگری کلیک کنید و در تله بیفتید، گزارش ورود شما کاملاً مسدود شده و برای طرف مقابل ارسال نخواهد شد.\n"
         f"🔹 **گزارش آنی و قطعی:** به محض اینکه شخصی در تله شما بیفتد، گزارش آن بدون هیچ وقفه‌ای و به صورت آنی برای شما ارسال می‌شود و نیاز به پرداخت موردی برای دیدن شکار از بین می‌رود.\n\n"
-        f"💬 در صورت بروز هرگونه مشکل یا داشتن سوالات بیشتر، با @Ao_0077 در ارتباط باشید."
+        f"💬 در صورت بروز هرگونه مشکل یا داشتن سوالات بیشتر، با @kacchal در ارتباط باشید."
     )
-    
     keyboard = InlineKeyboardMarkup()
     keyboard.add(InlineKeyboardButton("🔙 بازگشت به پنل", callback_data="back_to_panel"))
     hide_keyboard = ReplyKeyboardRemove()
-    
-    bot.send_message(
-        user_id, 
-        help_text, 
-        reply_markup=keyboard, 
-        parse_mode='Markdown'
-    )
+    bot.send_message(user_id, help_text, reply_markup=keyboard, parse_mode='Markdown')
 
 # ========== پیام ناشناس رایگان (بدون نیاز به اشتراک) ==========
 @bot.callback_query_handler(func=lambda call: call.data.startswith("anon_"))
